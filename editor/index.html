@@ -1,0 +1,1605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Swell Editor</title>
+<!--
+  The web editor and live view for Swell, the snapshot-morphing controller
+  app on the OXI E16 (docs/design.md).
+  Talks SysEx over USB MIDI (Web MIDI); the protocol is src/core/proto.h
+  and the bank blob is src/core/store.h. One self-contained file: open
+  it from file:// or localhost in Chrome. ?demo runs it against a pretend E16.
+
+  The script block with id "swell-codec" is plain JS with no DOM use: the Node
+  test (test/editor_codec_test.mjs) extracts and runs it.
+-->
+<style>
+:root {
+  --page: #0c0d0f;
+  --panel: #141518;
+  --panel2: #1a1c20;
+  --edge: #2a2d33;
+  --edge2: #3a3e46;
+  --ink: #e4e6ea;
+  --muted: #8b9099;
+  --faint: #5b6068;
+  --a: #2ec7b4;            /* layer A teal */
+  --b: #f2a33a;            /* layer B amber */
+  --ok: #4cd07d;
+  --warn: #f0b44c;
+  --bad: #ff6b6b;
+  --ghost: #ffffff;
+  --led-off: #2a2c31;
+  --input: #101114;
+  --sel: #23262c;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --page: #eceae6; --panel: #f8f7f4; --panel2: #ffffff; --edge: #d6d3cc; --edge2: #bdb9b0;
+    --ink: #1d1f23; --muted: #5e636b; --faint: #8f949b; --a: #0d9488; --b: #c77712;
+    --ghost: #1d1f23; --led-off: #dedad2; --input: #ffffff; --sel: #e6e3dc;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--page); color: var(--ink); }
+body { font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+.num, .mono { font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+
+header.top { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--edge); background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+.brand { font-weight: 650; letter-spacing: .04em; font-size: 15px; }
+.brand span { color: var(--muted); font-weight: 500; margin-left: 6px; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 3px 11px 3px 9px; border-radius: 999px; background: var(--panel2); border: 1px solid var(--edge); color: var(--muted); font-size: 12px; white-space: nowrap; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; }
+.pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.pill[data-s="live"] { color: var(--ink); }
+.pill[data-s="live"] i { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.pill[data-s="wait"] i { background: var(--warn); animation: blink 1.2s infinite; }
+.pill[data-s="bad"] i { background: var(--bad); }
+.pill[data-s="demo"] i { background: var(--b); }
+@keyframes blink { 50% { opacity: .3; } }
+.ports { display: flex; gap: 8px; align-items: center; margin-left: auto; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
+select, input[type=text], input[type=number] { background: var(--input); border: 1px solid var(--edge); border-radius: 5px; padding: 3px 6px; }
+select:focus, input:focus { outline: 1px solid var(--a); outline-offset: 0; }
+.btn { appearance: none; background: var(--panel2); border: 1px solid var(--edge2); border-radius: 6px; padding: 4px 11px; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--muted); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.on { background: var(--ink); color: var(--page); border-color: var(--ink); }
+.btn.primary { background: var(--a); color: #04110f; border-color: var(--a); font-weight: 600; }
+.btn.warn { border-color: var(--b); color: var(--b); }
+
+.layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: calc(100vh - 50px); }
+aside.banks { border-right: 1px solid var(--edge); background: var(--panel); padding: 10px 8px; }
+.h { font-size: 10.5px; text-transform: uppercase; letter-spacing: .14em; color: var(--faint); font-weight: 650; margin: 2px 6px 8px; display: flex; align-items: center; gap: 8px; }
+.h .sp { flex: 1; }
+#bankList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+#bankList li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+#bankList li:hover { background: var(--panel2); }
+#bankList li.sel { background: var(--sel); border-color: var(--edge2); }
+#bankList .n { color: var(--faint); width: 1.6em; font-size: 11px; }
+#bankList .nm { flex: 1; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre; overflow: hidden; }
+#bankList .cur { width: 7px; height: 7px; border-radius: 50%; background: transparent; }
+#bankList li.devcur .cur { background: var(--a); box-shadow: 0 0 6px var(--a); }
+#bankList .ed { color: var(--b); font-size: 11px; width: 1em; text-align: center; }
+main { padding: 12px 16px 40px; min-width: 0; }
+section.card { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+.notice { border-color: var(--b); }
+.notice h2 { margin: 0 0 4px; font-size: 14px; }
+.notice p { margin: 4px 0; color: var(--muted); }
+.notice code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+
+/* ---- live ---- */
+.status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-bottom: 10px; }
+.stat { display: flex; align-items: baseline; gap: 6px; }
+.stat .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--faint); }
+.stat .v { font-weight: 650; font-variant-numeric: tabular-nums; }
+.stat .v.big { font-size: 17px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--b); vertical-align: middle; }
+.bars { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin-bottom: 12px; }
+.bar { position: relative; height: 18px; border-radius: 4px; background: var(--panel2); border: 1px solid var(--edge); overflow: hidden; }
+.bar > i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: color-mix(in srgb, var(--a) 55%, transparent); }
+.bar.b > i { background: color-mix(in srgb, var(--b) 60%, transparent); }
+.bar > span { position: relative; padding: 0 8px; font-size: 11.5px; line-height: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bar .ticks { position: absolute; inset: 0; display: flex; }
+.bar .ticks b { flex: 1; border-right: 1px solid color-mix(in srgb, var(--ink) 14%, transparent); }
+.bar .ticks b:last-child { border-right: 0; }
+.rings { display: grid; grid-template-columns: 26px repeat(16, minmax(0, 1fr)); gap: 2px 4px; align-items: center; }
+.rowlab { appearance: none; border: 1px solid var(--edge); background: var(--panel2); border-radius: 5px; font-weight: 700; cursor: pointer; padding: 4px 0; width: 24px; color: var(--muted); }
+.rowlab.r2 { display: none; }
+.rowlab.cur.a { color: #04110f; background: var(--a); border-color: var(--a); }
+.rowlab.cur.b { color: #1a0f00; background: var(--b); border-color: var(--b); }
+.ring { display: flex; flex-direction: column; align-items: center; min-width: 0; border-radius: 8px; padding: 2px 0; }
+.ring.dim { opacity: .55; }
+.ring canvas { width: 100%; max-width: 64px; aspect-ratio: 1; touch-action: none; cursor: ns-resize; display: block; }
+.ring .nm { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--muted); white-space: pre; overflow: hidden; max-width: 100%; }
+.ring .val { font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.togs { display: contents; }
+.tog { appearance: none; border: 1px solid var(--edge); background: var(--panel2); border-radius: 5px; padding: 3px 0; cursor: pointer; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--muted); overflow: hidden; white-space: pre; min-width: 0; }
+.tog.on { background: color-mix(in srgb, var(--ink) 85%, transparent); color: var(--page); border-color: var(--ink); }
+.slotbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.slots { display: grid; grid-template-columns: repeat(15, minmax(34px, 1fr)); gap: 4px; flex: 1; min-width: 0; }
+.slot { appearance: none; position: relative; border: 1px solid var(--edge); background: var(--panel2); border-radius: 6px; padding: 5px 0 4px; cursor: pointer; text-align: center; overflow: hidden; min-width: 0; }
+.slot .sn { font-weight: 700; font-variant-numeric: tabular-nums; position: relative; }
+.slot .sf { display: block; font-size: 9.5px; color: var(--faint); position: relative; }
+.slot.stored { border-color: var(--edge2); background: color-mix(in srgb, var(--a) 14%, var(--panel2)); }
+.slot.empty .sn { color: var(--faint); }
+.slot.current { border-color: var(--a); background: color-mix(in srgb, var(--a) 38%, var(--panel2)); }
+.slot.current .sf { color: var(--ink); }
+.slot.armed { border-color: var(--b); animation: arm 0.5s infinite alternate; }
+.slot.pending { border-color: var(--b); border-style: dashed; }
+@keyframes arm { from { box-shadow: inset 0 0 0 1px var(--b); } to { box-shadow: inset 0 0 0 1px var(--b), 0 0 10px var(--b); } }
+.slot .fill { position: absolute; left: 0; top: 0; bottom: 0; background: color-mix(in srgb, var(--b) 45%, transparent); width: 0; }
+.slotmode { display: flex; gap: 4px; }
+.hint { color: var(--faint); font-size: 11.5px; margin-top: 6px; }
+
+/* ---- setup ---- */
+.setup-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.setup-head h2 { margin: 0; font-size: 14px; }
+.setup-head .sp { flex: 1; }
+.fields { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-bottom: 10px; }
+.fields label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.fields label input, .fields label select { color: var(--ink); }
+.chk { display: inline-flex; gap: 6px; align-items: center; }
+.chk label { gap: 2px !important; font-size: 11.5px; }
+.tabs { display: flex; gap: 4px; margin: 4px 0 8px; border-bottom: 1px solid var(--edge); }
+.tab { appearance: none; border: 0; background: none; padding: 6px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab.on { color: var(--ink); border-bottom-color: var(--a); }
+.tablewrap { overflow-x: auto; }
+table.grid { border-collapse: collapse; width: 100%; min-width: 720px; }
+table.grid th { text-align: left; font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); padding: 4px 4px; border-bottom: 1px solid var(--edge); position: sticky; top: 0; background: var(--panel); }
+table.grid td { padding: 2px 4px; border-bottom: 1px solid color-mix(in srgb, var(--edge) 50%, transparent); }
+table.grid tr.layerB td:first-child { color: var(--b); }
+table.grid tr.layerA td:first-child { color: var(--a); }
+table.grid td:first-child { font-weight: 650; width: 3em; font-variant-numeric: tabular-nums; }
+table.grid input[type=text] { width: 7.5em; font-family: ui-monospace, Menlo, monospace; }
+table.grid input[type=number] { width: 5.4em; }
+table.grid input.ch { width: 3.6em; }
+table.grid tr.sep td { border-top: 1px solid var(--edge2); }
+.progress { height: 4px; background: var(--panel2); border-radius: 2px; overflow: hidden; width: 120px; display: inline-block; vertical-align: middle; }
+.progress i { display: block; height: 100%; width: 0; background: var(--a); }
+#sendMsg { font-size: 12px; color: var(--muted); }
+#sendMsg.err { color: var(--bad); }
+#log { list-style: none; margin: 0; padding: 0; max-height: 150px; overflow: auto; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+#log li { padding: 1px 0; color: var(--muted); }
+#log li.err { color: var(--bad); }
+#log li .t { color: var(--faint); margin-right: 8px; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside.banks { border-right: 0; border-bottom: 1px solid var(--edge); }
+  #bankList { flex-direction: row; flex-wrap: wrap; }
+  #bankList li { flex: 1 0 140px; }
+  .rings { grid-template-columns: 22px repeat(8, minmax(0, 1fr)); }
+  .rings .rowlab.r2 { display: inline-block; }
+  .slots { grid-template-columns: repeat(8, minmax(34px, 1fr)); }
+  .bars { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">SWELL<span>editor · OXI E16</span></div>
+  <div id="pill" class="pill" data-s="wait" role="status" aria-live="polite"><i></i><span>Starting…</span></div>
+  <div class="ports">
+    <label>In <select id="inSel"></select></label>
+    <label>Out <select id="outSel"></select></label>
+    <button class="btn" id="reconnect" type="button">Reconnect</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="banks">
+    <div class="h">Banks<span class="sp"></span></div>
+    <ol id="bankList"></ol>
+    <div class="hint" style="margin:10px 6px">● current on the E16 · <span style="color:var(--b)">✎</span> edited here, not sent</div>
+  </aside>
+
+  <main>
+    <section id="notice" class="card notice" hidden></section>
+
+    <section class="card" id="live" aria-label="Live view">
+      <div class="status">
+        <div class="stat"><span class="k">Bank</span><span class="v big" id="stBank">—</span></div>
+        <div class="stat"><span class="k">Slot</span><span class="v big" id="stSlot">—</span></div>
+        <div class="stat"><span class="k">Layer</span><span class="v" id="stLayer">—</span></div>
+        <div class="stat"><span class="k">BPM</span><span class="v" id="stBpm">—</span></div>
+        <div class="stat"><span class="k">Clock</span><span class="v" id="stClock">—</span></div>
+        <div class="stat" id="stDirtyWrap" hidden><span class="dot"></span><span class="k">unsaved on E16</span></div>
+      </div>
+      <div class="bars">
+        <div class="bar" id="cycleBar" title="The cycle: an armed slot drops at its end"><div class="ticks" id="cycleTicks"></div><i></i><span id="cycleTxt">cycle</span></div>
+        <div class="bar b" id="fadeBar" title="Armed / fading"><i></i><span id="fadeTxt">—</span></div>
+      </div>
+      <div class="rings" id="rings"></div>
+      <div class="slotbar">
+        <div class="slotmode">
+          <button class="btn" id="mJump" type="button" title="Next slot click jumps to it now (or shift-click a slot)">Jump</button>
+          <button class="btn" id="mStore" type="button" title="Next slot click stores the live state into it">Store</button>
+          <button class="btn" id="cancelArm" type="button" title="Cancel the armed slot">Cancel</button>
+        </div>
+        <div class="slots" id="slots"></div>
+      </div>
+      <div class="hint">Click a slot to arm it (it drops at the end of the cycle; click again to jump). Shift-click jumps. Drag a ring up/down to set a value (Shift: fine). Click a toggle to flip it. Click A/B to switch the layer the encoders edit.</div>
+    </section>
+
+    <section class="card" id="setup" aria-label="Setup">
+      <div class="setup-head">
+        <h2 id="setupTitle">Bank 1</h2>
+        <button class="btn" id="playBank" type="button" title="Make this the E16's current bank">Load on E16</button>
+        <span class="sp"></span>
+        <span id="sendMsg"></span>
+        <span class="progress" id="sendProg" hidden><i></i></span>
+        <button class="btn primary" id="sendBtn" type="button">Send to E16</button>
+        <button class="btn" id="revertBtn" type="button">Revert</button>
+        <button class="btn" id="exportBtn" type="button">Export .bin</button>
+        <button class="btn" id="importBtn" type="button">Import .bin</button>
+        <input type="file" id="importFile" accept=".bin,application/octet-stream" hidden>
+      </div>
+      <div class="fields">
+        <label>Name <input type="text" id="fName" maxlength="8" size="9" class="mono"></label>
+        <label>Cycle <select id="fCycle"></select></label>
+        <label>Jump quantize <select id="fJq"></select></label>
+        <label>BPM <input type="number" id="fBpm" min="40" max="300" step="0.1" style="width:6em"></label>
+        <span class="chk" id="fClock"><span style="color:var(--muted)">Clock out</span></span>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab on" data-tab="ctl" type="button">Controls</button>
+        <button class="tab" data-tab="tog" type="button">Toggles</button>
+        <button class="tab" data-tab="snap" type="button">Slots</button>
+      </div>
+      <div class="tablewrap" id="tabBody"></div>
+    </section>
+
+    <section class="card">
+      <div class="h">Log<span class="sp"></span><button class="btn" id="clearLog" type="button" style="padding:1px 8px;font-size:11px">Clear</button></div>
+      <ul id="log"></ul>
+    </section>
+  </main>
+</div>
+
+<script id="swell-codec">
+/* ===== Swell codec + protocol: no DOM; also run by Node (editor_codec_test.mjs) ===== */
+"use strict";
+(function (root) {
+  const SW = {
+    VER: 1, BANKS: 16, SLOTS: 15, CONTROLS: 32, TOGGLES: 16, ENCODERS: 16, LAYERS: 2,
+    NAME_LEN: 8, VMAX: 16383, BLOB_SIZE: 1870, CRC_OFS: 1868, CHUNK: 128, MAX: 200, EVENT_RAW: 156,
+    EVENT_MS: 66, PPQN: 480,
+  };
+  const CMD = { HELLO: 1, READ: 2, WRITE: 3, COMMIT: 4, ACTION: 5, SUBSCRIBE: 6, STATE: 7, EVENT: 0x10, NAK: 0x7F };
+  const ACT = { SELECT_BANK: 1, PRESS: 2, JUMP: 3, STORE: 4, CANCEL_ARM: 5, SET_VALUE: 6, SET_TOGGLE: 7, LAYER: 8 };
+  const ERR = { BAD_MSG: 1, BAD_CMD: 2, BAD_ARG: 3, NOT_STAGED: 4, BAD_BLOB: 5, BUSY: 6 };
+  const ERR_NAMES = ["?", "BAD_MSG", "BAD_CMD", "BAD_ARG", "NOT_STAGED", "BAD_BLOB", "BUSY"];
+  const CMD_NAMES = { 1: "HELLO", 2: "READ", 3: "WRITE", 4: "COMMIT", 5: "ACTION", 6: "SUBSCRIBE", 7: "STATE", 16: "EVENT", 127: "NAK" };
+  const T = { OFF: 0, CC7: 1, CC14: 2, NRPN7: 3, NRPN14: 4 };
+  const TYPE_NAMES = ["Off", "CC 7-bit", "CC 14-bit", "NRPN 7-bit", "NRPN 14-bit"];
+  const PORT = { TRS1: 1, TRS2: 2, USB: 4, ALL: 7 };
+  const FADE_BEATS = [0, 1, 2, 4, 8, 16, 32];
+  const FADE_NAMES = ["cut", "1 beat", "2 beats", "1 bar", "2 bars", "4 bars", "8 bars"];
+  const FADE_SHORT = ["cut", "1b", "2b", "1B", "2B", "4B", "8B"];
+  const CURVE_NAMES = ["linear", "ease", "S", "hold"];
+  const CYCLE_BARS = [1, 2, 4, 8, 16];
+  const JQ_NAMES = ["none", "beat", "bar"];
+  const PREFIX = [0xF0, 0x7D, 0x53, 0x57];
+
+  /* Layout (store.h). */
+  const CTL_OFS = 18, CTL_SIZE = 18, TOG_OFS = 594, TOG_SIZE = 14, SNAP_OFS = 818, SNAP_SIZE = 70;
+
+  /* ---- 7-in-8 packing ---- */
+  function pack7(raw) {
+    const n = raw.length, out = new Uint8Array(n + Math.ceil(n / 7));
+    let o = 0;
+    for (let i = 0; i < n; i += 7) {
+      const g = Math.min(7, n - i);
+      let hdr = 0;
+      for (let k = 0; k < g; k++) hdr |= ((raw[i + k] >> 7) & 1) << k;
+      out[o++] = hdr;
+      for (let k = 0; k < g; k++) out[o++] = raw[i + k] & 0x7F;
+    }
+    return out;
+  }
+  /* null on bad input (a byte with its top bit set, a header with no bytes
+   * or with bits for bytes that aren't there) -- the same rules as C. */
+  function unpack7(enc) {
+    const n = enc.length, out = [];
+    let i = 0;
+    while (i < n) {
+      const hdr = enc[i++];
+      const g = Math.min(7, n - i);
+      if ((hdr & 0x80) || g === 0 || (hdr >> g) !== 0) return null;
+      for (let k = 0; k < g; k++) {
+        const b = enc[i + k];
+        if (b & 0x80) return null;
+        out.push(b | (((hdr >> k) & 1) << 7));
+      }
+      i += g;
+    }
+    return Uint8Array.from(out);
+  }
+
+  /* CRC-16/CCITT-FALSE: poly 0x1021, init 0xFFFF, no reflection, no xorout. */
+  function crc16(p, n) {
+    if (n === undefined) n = p.length;
+    let c = 0xFFFF;
+    for (let i = 0; i < n; i++) {
+      c ^= p[i] << 8;
+      for (let k = 0; k < 8; k++) c = (c & 0x8000) ? ((c << 1) ^ 0x1021) & 0xFFFF : (c << 1) & 0xFFFF;
+    }
+    return c;
+  }
+
+  /* ---- the model (model.h) ---- */
+  const numHi = (type) => (type === T.CC7 ? 127 : type === T.CC14 ? 31 : 16383);
+  const valHi = (type) => (type === T.CC7 || type === T.NRPN7 ? 127 : 16383);
+  const isWide = (type) => type === T.CC14 || type === T.NRPN14;
+
+  function defaultBank(index) {
+    const n = index < 0 ? 1 : index > 98 ? 99 : index + 1;
+    const b = {
+      name: "BANK " + String(n).padStart(2, "0"), cycle: 2, jump_quant: 0, clock_out: 0, bpm_x10: 1200,
+      ctl: [], tog: [], snap: [],
+    };
+    for (let c = 0; c < SW.CONTROLS; c++) {
+      const layer = c >> 4, enc = c & 15;
+      b.ctl.push({ name: (layer ? "B" : "A") + (enc + 1), type: T.CC7, ports: PORT.TRS1 | PORT.USB, channel: 0,
+        number: (layer ? 40 : 20) + enc, min: 0, max: 127 });
+    }
+    for (let t = 0; t < SW.TOGGLES; t++)
+      b.tog.push({ name: "T" + (t + 1), ports: PORT.TRS1 | PORT.USB, channel: 0, cc: 80 + t, off: 0, on: 127 });
+    for (let s = 0; s < SW.SLOTS; s++)
+      b.snap.push({ stored: 0, fade: 3, curve: 0, toggles: 0, value: new Array(SW.CONTROLS).fill(0) });
+    return b;
+  }
+
+  function cloneBank(b) {
+    return {
+      name: b.name, cycle: b.cycle, jump_quant: b.jump_quant, clock_out: b.clock_out, bpm_x10: b.bpm_x10,
+      ctl: b.ctl.map((k) => ({ ...k })), tog: b.tog.map((g) => ({ ...g })),
+      snap: b.snap.map((s) => ({ ...s, value: s.value.slice() })),
+    };
+  }
+
+  /* As model.c's sanitize_name: unprintable -> space, all after the first NUL dropped. */
+  function cleanName(s) {
+    let o = "";
+    for (let i = 0; i < s.length && o.length < SW.NAME_LEN; i++) {
+      const c = s.charCodeAt(i);
+      if (c === 0) break;
+      o += c < 0x20 || c > 0x7E ? " " : s[i];
+    }
+    return o;
+  }
+
+  /* Clamp every field like sw_bank_sanitize(); returns the number changed. */
+  function sanitizeBank(b) {
+    let n = 0;
+    const cl = (o, k, lo, hi) => {
+      let v = Math.round(Number(o[k]));
+      if (!Number.isFinite(v)) v = lo;
+      const w = Math.min(hi, Math.max(lo, v));
+      if (w !== o[k]) { o[k] = w; n++; }
+    };
+    const nm = (o) => { const c = cleanName(String(o.name ?? "")); if (c !== o.name) { o.name = c; n++; } };
+    nm(b);
+    cl(b, "cycle", 0, CYCLE_BARS.length - 1);
+    cl(b, "jump_quant", 0, JQ_NAMES.length - 1);
+    cl(b, "clock_out", 0, 255);
+    if (b.clock_out & ~PORT.ALL) { b.clock_out &= PORT.ALL; n++; }
+    cl(b, "bpm_x10", 400, 3000);
+    for (const k of b.ctl) {
+      nm(k);
+      cl(k, "type", 0, 255);
+      if (k.type >= TYPE_NAMES.length) { k.type = T.OFF; n++; }
+      cl(k, "ports", 0, 255);
+      if (k.ports & ~PORT.ALL) { k.ports &= PORT.ALL; n++; }
+      cl(k, "channel", 0, 15);
+      cl(k, "number", 0, numHi(k.type));
+      cl(k, "min", 0, valHi(k.type));
+      cl(k, "max", 0, valHi(k.type));
+    }
+    for (const g of b.tog) {
+      nm(g);
+      cl(g, "ports", 0, 255);
+      if (g.ports & ~PORT.ALL) { g.ports &= PORT.ALL; n++; }
+      cl(g, "channel", 0, 15);
+      cl(g, "cc", 0, 127);
+      cl(g, "off", 0, 127);
+      cl(g, "on", 0, 127);
+    }
+    for (const s of b.snap) {
+      cl(s, "stored", 0, 1);
+      cl(s, "fade", 0, FADE_BEATS.length - 1);
+      cl(s, "curve", 0, CURVE_NAMES.length - 1);
+      cl(s, "toggles", 0, 0xFFFF);
+      for (let c = 0; c < SW.CONTROLS; c++) {
+        let v = Math.round(Number(s.value[c]));
+        if (!Number.isFinite(v)) v = 0;
+        const w = Math.min(SW.VMAX, Math.max(0, v));
+        if (w !== s.value[c]) { s.value[c] = w; n++; }
+      }
+    }
+    return n;
+  }
+
+  /* ---- the blob (store.h) ---- */
+  const g16 = (p, o) => p[o] | (p[o + 1] << 8);
+  const g32 = (p, o) => (p[o] | (p[o + 1] << 8) | (p[o + 2] << 16) | (p[o + 3] << 24)) >>> 0;
+  const p16 = (p, o, v) => { p[o] = v & 0xFF; p[o + 1] = (v >> 8) & 0xFF; };
+  const p32 = (p, o, v) => { p16(p, o, v & 0xFFFF); p16(p, o + 2, (v >>> 16) & 0xFFFF); };
+  function getName(p, o) {
+    let s = "";
+    for (let i = 0; i < SW.NAME_LEN; i++) s += String.fromCharCode(p[o + i]);
+    return s; /* sanitize trims it at the first NUL */
+  }
+  function putName(p, o, s) {
+    for (let i = 0; i < SW.NAME_LEN; i++) p[o + i] = i < s.length ? s.charCodeAt(i) & 0xFF : 0;
+  }
+
+  /* -> { ok: true, bank } or { ok: false, err: "size" | "magic" | "crc" } */
+  function decodeBank(buf) {
+    if (!buf || buf.length !== SW.BLOB_SIZE) return { ok: false, err: "size" };
+    if (buf[0] !== 0x53 || buf[1] !== 0x57 || buf[2] !== 0x42 || buf[3] !== 0x31) return { ok: false, err: "magic" };
+    if (g16(buf, SW.CRC_OFS) !== crc16(buf, SW.CRC_OFS)) return { ok: false, err: "crc" };
+    const b = { name: getName(buf, 4), cycle: buf[12], jump_quant: buf[13], clock_out: buf[14], bpm_x10: g16(buf, 16),
+      ctl: [], tog: [], snap: [] };
+    for (let c = 0; c < SW.CONTROLS; c++) {
+      const o = CTL_OFS + c * CTL_SIZE;
+      b.ctl.push({ name: getName(buf, o), type: buf[o + 8], ports: buf[o + 9], channel: buf[o + 10],
+        number: g16(buf, o + 12), min: g16(buf, o + 14), max: g16(buf, o + 16) });
+    }
+    for (let t = 0; t < SW.TOGGLES; t++) {
+      const o = TOG_OFS + t * TOG_SIZE;
+      b.tog.push({ name: getName(buf, o), ports: buf[o + 8], channel: buf[o + 9], cc: buf[o + 10], off: buf[o + 11],
+        on: buf[o + 12] });
+    }
+    for (let s = 0; s < SW.SLOTS; s++) {
+      const o = SNAP_OFS + s * SNAP_SIZE;
+      const value = [];
+      for (let c = 0; c < SW.CONTROLS; c++) value.push(g16(buf, o + 6 + 2 * c));
+      b.snap.push({ stored: buf[o], fade: buf[o + 1], curve: buf[o + 2], toggles: g16(buf, o + 4), value });
+    }
+    sanitizeBank(b);
+    return { ok: true, bank: b };
+  }
+
+  function encodeBank(b) {
+    const p = new Uint8Array(SW.BLOB_SIZE);
+    p[0] = 0x53; p[1] = 0x57; p[2] = 0x42; p[3] = 0x31;
+    putName(p, 4, b.name);
+    p[12] = b.cycle; p[13] = b.jump_quant; p[14] = b.clock_out;
+    p16(p, 16, b.bpm_x10);
+    for (let c = 0; c < SW.CONTROLS; c++) {
+      const k = b.ctl[c], o = CTL_OFS + c * CTL_SIZE;
+      putName(p, o, k.name);
+      p[o + 8] = k.type; p[o + 9] = k.ports; p[o + 10] = k.channel;
+      p16(p, o + 12, k.number); p16(p, o + 14, k.min); p16(p, o + 16, k.max);
+    }
+    for (let t = 0; t < SW.TOGGLES; t++) {
+      const g = b.tog[t], o = TOG_OFS + t * TOG_SIZE;
+      putName(p, o, g.name);
+      p[o + 8] = g.ports; p[o + 9] = g.channel; p[o + 10] = g.cc; p[o + 11] = g.off; p[o + 12] = g.on;
+    }
+    for (let s = 0; s < SW.SLOTS; s++) {
+      const n = b.snap[s], o = SNAP_OFS + s * SNAP_SIZE;
+      p[o] = n.stored; p[o + 1] = n.fade; p[o + 2] = n.curve;
+      p16(p, o + 4, n.toggles);
+      for (let c = 0; c < SW.CONTROLS; c++) p16(p, o + 6 + 2 * c, n.value[c]);
+    }
+    p16(p, SW.CRC_OFS, crc16(p, SW.CRC_OFS));
+    return p;
+  }
+
+  /* The setup an editor edits, put onto a fresh copy of the bank from the
+   * E16 (keeping its snapshot contents, which the E16 may have stored since). */
+  function mergeConfig(fresh, edited) {
+    const m = cloneBank(fresh);
+    for (const k of ["name", "cycle", "jump_quant", "clock_out", "bpm_x10"]) m[k] = edited[k];
+    m.ctl = edited.ctl.map((k) => ({ ...k }));
+    m.tog = edited.tog.map((g) => ({ ...g }));
+    for (let s = 0; s < SW.SLOTS; s++) { m.snap[s].fade = edited.snap[s].fade; m.snap[s].curve = edited.snap[s].curve; }
+    return m;
+  }
+
+  /* out.h's mapping: position -> output units, rounded to nearest. */
+  function outValue(k, pos) {
+    const d = k.max - k.min;
+    const q = d * pos;
+    return k.min + (q >= 0 ? Math.floor((q + 8191) / SW.VMAX) : -Math.floor((-q + 8191) / SW.VMAX));
+  }
+
+  /* ---- messages ---- */
+  function buildMsg(cmd, seq, raw) {
+    const enc = pack7(raw || []);
+    const m = new Uint8Array(7 + enc.length);
+    m.set(PREFIX, 0);
+    m[4] = cmd & 0x7F; m[5] = seq & 0x7F;
+    m.set(enc, 6);
+    m[m.length - 1] = 0xF7;
+    return m;
+  }
+  /* null if it isn't ours; { cmd, seq, raw } (raw null if badly packed) */
+  function parseMsg(d) {
+    if (!d || d.length < 7 || d[0] !== 0xF0 || d[1] !== 0x7D || d[2] !== 0x53 || d[3] !== 0x57 || d[d.length - 1] !== 0xF7) return null;
+    return { cmd: d[4], seq: d[5], raw: unpack7(d.subarray ? d.subarray(6, d.length - 1) : d.slice(6, d.length - 1)) };
+  }
+  const i8 = (v) => (v > 127 ? v - 256 : v);
+
+  function parseHello(r) {
+    if (!r || r.length < 17) return null;
+    let name = "";
+    for (let i = 9; i < 17 && r[i]; i++) name += String.fromCharCode(r[i]);
+    return { ver: r[0], banks: r[1], slots: r[2], controls: r[3], toggles: r[4], blob_size: g16(r, 5),
+      current_bank: r[7], layer: r[8], name };
+  }
+
+  function parseEvent(r) {
+    if (!r || r.length !== SW.EVENT_RAW) return null;
+    const live = [], targets = [];
+    for (let c = 0; c < SW.CONTROLS; c++) { live.push(g16(r, 27 + 2 * c)); targets.push(g16(r, 92 + 2 * c)); }
+    return {
+      bank: r[0], layer: r[1], current_slot: i8(r[2]), modified: r[3], armed_slot: i8(r[4]), fading: r[5],
+      fade_slot: i8(r[6]), fade_progress: g16(r, 7), pending_jump: i8(r[9]), clock_source: r[10], running: r[11],
+      bpm_x10: g16(r, 12), cycle_clocks: g32(r, 14), cycle_pos: g32(r, 18), stored_mask: g16(r, 22), dirty: r[24],
+      toggles: g16(r, 25), live, has_targets: r[91], targets,
+    };
+  }
+  /* The inverse, for the demo device and the tests. */
+  function buildEvent(e) {
+    const r = new Uint8Array(SW.EVENT_RAW);
+    r[0] = e.bank; r[1] = e.layer; r[2] = e.current_slot & 0xFF; r[3] = e.modified ? 1 : 0; r[4] = e.armed_slot & 0xFF;
+    r[5] = e.fading ? 1 : 0; r[6] = e.fade_slot & 0xFF; p16(r, 7, e.fade_progress); r[9] = e.pending_jump & 0xFF;
+    r[10] = e.clock_source; r[11] = e.running ? 1 : 0; p16(r, 12, e.bpm_x10); p32(r, 14, e.cycle_clocks);
+    p32(r, 18, e.cycle_pos); p16(r, 22, e.stored_mask); r[24] = e.dirty ? 1 : 0; p16(r, 25, e.toggles);
+    for (let c = 0; c < SW.CONTROLS; c++) { p16(r, 27 + 2 * c, e.live[c]); p16(r, 92 + 2 * c, e.has_targets ? e.targets[c] : 0); }
+    r[91] = e.has_targets ? 1 : 0;
+    return r;
+  }
+
+  /* ---- the request queue: one request in flight, 500 ms, one retry ---- */
+  class ProtoError extends Error {
+    constructor(msg, info) { super(msg); Object.assign(this, info); }
+  }
+  class Client {
+    /* send(bytes) puts a message on the wire; call handle(bytes) for each
+     * SysEx received. onEvent(event) gets the parsed EVENTs. */
+    constructor(send, opts) {
+      opts = opts || {};
+      this.send = send;
+      this.timeout = opts.timeout ?? 500;
+      this.retries = opts.retries ?? 1;
+      this.q = [];
+      this.cur = null;
+      this.seq = 0;
+      this.onEvent = null;
+      this.onStray = null;
+      this.stats = { sent: 0, timeouts: 0, naks: 0 };
+    }
+    /* -> Promise of the reply's raw payload (Uint8Array); rejects with a
+     * ProtoError carrying .nak (the error code) or .timeout. o.key: a queued
+     * (not yet sent) request with the same key is replaced by this one. */
+    request(cmd, raw, o) {
+      o = o || {};
+      raw = Uint8Array.from(raw || []);
+      return new Promise((res, rej) => {
+        if (o.key) {
+          const old = this.q.find((j) => j.key === o.key);
+          if (old) { old.raw = raw; old.waiters.push({ res, rej }); return; }
+        }
+        this.q.push({ cmd, raw, key: o.key, tries: o.retries ?? this.retries, timeout: o.timeout ?? this.timeout,
+          waiters: [{ res, rej }] });
+        this._pump();
+      });
+    }
+    get busy() { return !!this.cur || this.q.length > 0; }
+    _pump() {
+      if (this.cur || !this.q.length) return;
+      this.cur = this.q.shift();
+      this._transmit();
+    }
+    _transmit() {
+      const j = this.cur;
+      this.seq = (this.seq % 127) + 1;
+      j.seq = this.seq;
+      this.stats.sent++;
+      j.timer = setTimeout(() => this._expire(j), j.timeout);
+      try { this.send(buildMsg(j.cmd, j.seq, j.raw)); }
+      catch (e) { clearTimeout(j.timer); this._finish(j, null, new ProtoError("send failed: " + e.message, { cmd: j.cmd })); }
+    }
+    _expire(j) {
+      if (this.cur !== j) return;
+      this.stats.timeouts++;
+      if (j.tries > 0) { j.tries--; this._transmit(); return; }
+      this._finish(j, null, new ProtoError(`${CMD_NAMES[j.cmd] || j.cmd}: no reply`, { cmd: j.cmd, timeout: true }));
+    }
+    _finish(j, raw, err) {
+      if (this.cur === j) this.cur = null;
+      for (const w of j.waiters) err ? w.rej(err) : w.res(raw);
+      this._pump();
+    }
+    /* Returns true if the message was ours. */
+    handle(data) {
+      const m = parseMsg(data);
+      if (!m) return false;
+      if (m.cmd === CMD.EVENT) {
+        const ev = parseEvent(m.raw);
+        if (ev && this.onEvent) this.onEvent(ev);
+        return true;
+      }
+      const j = this.cur;
+      if (!j || m.seq !== j.seq || (m.cmd !== j.cmd && m.cmd !== CMD.NAK)) {
+        if (this.onStray) this.onStray(m);
+        return true;
+      }
+      clearTimeout(j.timer);
+      if (m.raw === null) { this._finish(j, null, new ProtoError("bad reply packing", { cmd: j.cmd })); return true; }
+      if (m.cmd === CMD.NAK) {
+        this.stats.naks++;
+        const err = m.raw[1] || 0;
+        this._finish(j, null, new ProtoError(`${CMD_NAMES[j.cmd] || j.cmd}: NAK ${ERR_NAMES[err] || err}`,
+          { cmd: j.cmd, nak: err, nakName: ERR_NAMES[err] || String(err) }));
+        return true;
+      }
+      this._finish(j, m.raw, null);
+      return true;
+    }
+    /* Drop everything (disconnect). */
+    reset(reason) {
+      const all = (this.cur ? [this.cur] : []).concat(this.q);
+      this.cur = null; this.q = [];
+      for (const j of all) {
+        clearTimeout(j.timer);
+        for (const w of j.waiters) w.rej(new ProtoError(reason || "disconnected", { cmd: j.cmd, reset: true }));
+      }
+    }
+  }
+
+  /* ---- operations ---- */
+  async function hello(c) {
+    const h = parseHello(await c.request(CMD.HELLO));
+    if (!h) throw new ProtoError("bad HELLO reply", {});
+    return h;
+  }
+  async function readBank(c, bank, progress) {
+    const blob = new Uint8Array(SW.BLOB_SIZE);
+    for (let ofs = 0; ofs < SW.BLOB_SIZE; ofs += SW.CHUNK) {
+      const n = Math.min(SW.CHUNK, SW.BLOB_SIZE - ofs);
+      const r = await c.request(CMD.READ, [bank, ofs & 0xFF, ofs >> 8, n]);
+      if (r.length !== 3 + n || r[0] !== bank || g16(r, 1) !== ofs) throw new ProtoError("bad READ reply", { cmd: CMD.READ });
+      blob.set(r.subarray(3), ofs);
+      if (progress) progress((ofs + n) / SW.BLOB_SIZE);
+    }
+    return blob;
+  }
+  async function writeBank(c, bank, blob, progress) {
+    if (blob.length !== SW.BLOB_SIZE) throw new ProtoError("blob size", {});
+    for (let ofs = 0; ofs < SW.BLOB_SIZE; ofs += SW.CHUNK) {
+      const n = Math.min(SW.CHUNK, SW.BLOB_SIZE - ofs);
+      const raw = new Uint8Array(3 + n);
+      raw[0] = bank; raw[1] = ofs & 0xFF; raw[2] = ofs >> 8;
+      raw.set(blob.subarray(ofs, ofs + n), 3);
+      const r = await c.request(CMD.WRITE, raw);
+      if (r.length !== 3 || r[0] !== bank || g16(r, 1) !== ofs) throw new ProtoError("bad WRITE reply", { cmd: CMD.WRITE });
+      if (progress) progress((ofs + n) / SW.BLOB_SIZE);
+    }
+    const r = await c.request(CMD.COMMIT, [bank], { retries: 0, timeout: 1500 });
+    if (r.length !== 1 || r[0] !== bank) throw new ProtoError("bad COMMIT reply", { cmd: CMD.COMMIT });
+  }
+  function action(c, act, a, b, o) {
+    b = b || 0;
+    return c.request(CMD.ACTION, [act, a || 0, b & 0xFF, (b >> 8) & 0xFF], o);
+  }
+  function subscribe(c, on) { return c.request(CMD.SUBSCRIBE, [on ? 1 : 0]); }
+
+  /* ---- a pretend E16, for ?demo and the tests ---- */
+  class DemoDevice {
+    constructor() {
+      this.banks = [];
+      for (let i = 0; i < SW.BANKS; i++) this.banks.push(defaultBank(i));
+      const b = this.banks[0];
+      b.name = "DEMO";
+      b.ctl[3].name = "Cutoff"; b.ctl[4].name = "Reso"; b.ctl[16].type = T.CC14; b.ctl[16].number = 1; b.ctl[16].max = 16383;
+      b.tog[0].name = "Mute";
+      for (let s = 0; s < 5; s++) {
+        const n = b.snap[s];
+        n.stored = 1; n.fade = [0, 2, 3, 4, 5][s]; n.curve = s % 4; n.toggles = (0x1111 << (s % 4)) & 0xFFFF;
+        for (let c = 0; c < SW.CONTROLS; c++) n.value[c] = Math.round((0.5 + 0.45 * Math.sin(c * 0.5 + s * 1.7)) * SW.VMAX);
+      }
+      this.bank = 0; this.layer = 0; this.subscribed = 0; this.dirty = new Array(SW.BANKS).fill(0);
+      this.live = b.snap[0].value.slice(); this.toggles = b.snap[0].toggles;
+      this.cur = 0; this.modified = 0; this.armed = -1; this.fading = 0; this.fadeSlot = -1; this.prog = 0;
+      this.pending = -1; this.pos = 0; this.running = 1; this.from = null; this.to = null; this.fadeStart = 0; this.fadeLen = 0;
+      this.curve = 0; this.mask = 0; this.stage = new Uint8Array(SW.BLOB_SIZE); this.staged = new Uint8Array(SW.BLOB_SIZE);
+      this.stageBank = -1; this.lastMs = null; this.lastEv = null; this.lastEvMs = 0; this.lastFull = 0;
+    }
+    cycleClocks() { return CYCLE_BARS[this.banks[this.bank].cycle] * 4 * SW.PPQN; }
+    startFade(s) {
+      const n = this.banks[this.bank].snap[s];
+      this.toggles = n.toggles; this.cur = s; this.modified = 0; this.armed = -1; this.pending = -1;
+      this.from = this.live.slice(); this.to = n.value.slice(); this.curve = n.curve; this.mask = 0xFFFFFFFF;
+      this.fadeLen = FADE_BEATS[n.fade] * SW.PPQN; this.fadeStart = this.pos; this.fadeSlot = s;
+      if (!this.fadeLen) { this.live = this.to.slice(); this.fading = 0; this.prog = 0; } else { this.fading = 1; this.prog = 0; }
+    }
+    tick(ms) {
+      if (this.lastMs === null) this.lastMs = ms;
+      const dt = Math.max(0, ms - this.lastMs);
+      this.lastMs = ms;
+      const prev = this.pos, cyc = this.cycleClocks();
+      if (this.running) this.pos += dt / 1000 * this.banks[this.bank].bpm_x10 / 600 * SW.PPQN;
+      if (this.armed >= 0 && Math.floor(prev / cyc) !== Math.floor(this.pos / cyc)) this.startFade(this.armed);
+      if (this.fading) {
+        let x = Math.min(1, (this.pos - this.fadeStart) / this.fadeLen);
+        this.prog = Math.round(x * 65535);
+        const k = [x, 1 - (1 - x) * (1 - x), x * x * (3 - 2 * x), x < 1 ? 0 : 1][this.curve];
+        for (let c = 0; c < SW.CONTROLS; c++)
+          if (this.mask & (1 << c)) this.live[c] = Math.round(this.from[c] + (this.to[c] - this.from[c]) * k);
+        if (x >= 1) { this.fading = 0; this.prog = 0; }
+      }
+    }
+    state() {
+      const t = this.armed >= 0 ? this.banks[this.bank].snap[this.armed].value : this.fading ? this.to : null;
+      let stored = 0;
+      this.banks[this.bank].snap.forEach((n, s) => { if (n.stored) stored |= 1 << s; });
+      const cyc = this.cycleClocks();
+      return buildEvent({ bank: this.bank, layer: this.layer, current_slot: this.cur, modified: this.modified,
+        armed_slot: this.armed, fading: this.fading, fade_slot: this.fading ? this.fadeSlot : -1, fade_progress: this.prog,
+        pending_jump: this.pending, clock_source: 0, running: this.running, bpm_x10: this.banks[this.bank].bpm_x10,
+        cycle_clocks: cyc, cycle_pos: Math.floor(this.pos) % cyc, stored_mask: stored, dirty: this.dirty[this.bank],
+        toggles: this.toggles, live: this.live, has_targets: !!t, targets: t || [] });
+    }
+    /* An EVENT when one is due (the C rules), else null. */
+    event(ms) {
+      if (!this.subscribed) return null;
+      if (this.lastEv && ms - this.lastEvMs < SW.EVENT_MS) return null;
+      const r = this.state();
+      if (this.lastEv && ms - this.lastFull < 1000 && r.every((v, i) => v === this.lastEv[i])) return null;
+      this.lastEv = r; this.lastEvMs = ms; this.lastFull = ms;
+      return buildMsg(CMD.EVENT, 0, r);
+    }
+    handle(msg) {
+      const m = parseMsg(msg);
+      if (!m) return null;
+      const nak = (e) => buildMsg(CMD.NAK, m.seq, [m.cmd, e]);
+      const ok = (r) => buildMsg(m.cmd, m.seq, r);
+      const r = m.raw;
+      if (r === null) return nak(ERR.BAD_MSG);
+      switch (m.cmd) {
+        case CMD.HELLO:
+          return ok([1, SW.BANKS, SW.SLOTS, SW.CONTROLS, SW.TOGGLES, SW.BLOB_SIZE & 0xFF, SW.BLOB_SIZE >> 8, this.bank,
+            this.layer, 83, 87, 69, 76, 76, 0, 0, 0]);
+        case CMD.READ: {
+          if (r.length !== 4) return nak(ERR.BAD_MSG);
+          const ofs = g16(r, 1);
+          if (r[0] >= SW.BANKS || r[3] < 1 || r[3] > SW.CHUNK || ofs + r[3] > SW.BLOB_SIZE) return nak(ERR.BAD_ARG);
+          const blob = encodeBank(this.banks[r[0]]);
+          return ok([r[0], r[1], r[2], ...blob.subarray(ofs, ofs + r[3])]);
+        }
+        case CMD.WRITE: {
+          if (r.length < 4) return nak(ERR.BAD_MSG);
+          const ofs = g16(r, 1), n = r.length - 3;
+          if (r[0] >= SW.BANKS || n > SW.CHUNK || ofs + n > SW.BLOB_SIZE) return nak(ERR.BAD_ARG);
+          if (this.stageBank !== r[0]) { this.staged.fill(0); this.stageBank = r[0]; }
+          this.stage.set(r.subarray(3), ofs); this.staged.fill(1, ofs, ofs + n);
+          return ok([r[0], r[1], r[2]]);
+        }
+        case CMD.COMMIT: {
+          if (r.length !== 1) return nak(ERR.BAD_MSG);
+          if (r[0] >= SW.BANKS) return nak(ERR.BAD_ARG);
+          if (this.stageBank !== r[0] || this.staged.includes(0)) return nak(ERR.NOT_STAGED);
+          const d = decodeBank(this.stage);
+          this.staged.fill(0); this.stageBank = -1;
+          if (!d.ok) return nak(ERR.BAD_BLOB);
+          this.banks[r[0]] = d.bank; this.dirty[r[0]] = 1;
+          return ok([r[0]]);
+        }
+        case CMD.ACTION: {
+          if (r.length !== 4) return nak(ERR.BAD_MSG);
+          const a = r[1], v = g16(r, 2), bk = this.banks[this.bank];
+          switch (r[0]) {
+            case ACT.SELECT_BANK:
+              if (a >= SW.BANKS) return nak(ERR.BAD_ARG);
+              this.bank = a; this.armed = -1; this.fading = 0; this.pending = -1; this.cur = -1;
+              if (this.banks[a].snap[0].stored) this.startFade(0);
+              break;
+            case ACT.PRESS: case ACT.JUMP: case ACT.STORE:
+              if (a >= SW.SLOTS) return nak(ERR.BAD_ARG);
+              if (r[0] === ACT.STORE) {
+                const n = bk.snap[a];
+                n.stored = 1; n.value = this.live.slice(); n.toggles = this.toggles; this.cur = a; this.modified = 0;
+                this.dirty[this.bank] = 1;
+              } else if (!bk.snap[a].stored) {
+                /* an empty slot does nothing */
+              } else if (r[0] === ACT.JUMP || this.armed === a) this.startFade(a);
+              else this.armed = a;
+              break;
+            case ACT.CANCEL_ARM: this.armed = -1; break;
+            case ACT.SET_VALUE:
+              if (a >= SW.CONTROLS || v > SW.VMAX) return nak(ERR.BAD_ARG);
+              this.live[a] = v; this.mask &= ~(1 << a); this.modified = 1;
+              break;
+            case ACT.SET_TOGGLE:
+              if (a >= SW.TOGGLES || v > 1) return nak(ERR.BAD_ARG);
+              this.toggles = v ? this.toggles | (1 << a) : this.toggles & ~(1 << a); this.modified = 1;
+              break;
+            case ACT.LAYER:
+              if (a > 1) return nak(ERR.BAD_ARG);
+              this.layer = a;
+              break;
+            default: return nak(ERR.BAD_ARG);
+          }
+          return ok([r[0]]);
+        }
+        case CMD.SUBSCRIBE:
+          if (r.length !== 1) return nak(ERR.BAD_MSG);
+          if (r[0] > 1) return nak(ERR.BAD_ARG);
+          this.subscribed = r[0]; this.lastEv = null;
+          return ok([r[0]]);
+        case CMD.STATE:
+          return ok(this.state());
+        default:
+          return nak(ERR.BAD_CMD);
+      }
+    }
+  }
+
+  const api = { SW, CMD, ACT, ERR, ERR_NAMES, CMD_NAMES, T, TYPE_NAMES, PORT, FADE_BEATS, FADE_NAMES, FADE_SHORT,
+    CURVE_NAMES, CYCLE_BARS, JQ_NAMES, pack7, unpack7, crc16, numHi, valHi, isWide, defaultBank, cloneBank, cleanName,
+    sanitizeBank, decodeBank, encodeBank, mergeConfig, outValue, buildMsg, parseMsg, parseHello, parseEvent, buildEvent,
+    Client, ProtoError, hello, readBank, writeBank, action, subscribe, DemoDevice };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  root.Swell = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+/* ===== end of the codec ===== */
+</script>
+
+<script>
+"use strict";
+(() => {
+  const X = globalThis.Swell;
+  const { SW, CMD, ACT, T } = X;
+  const $ = (id) => document.getElementById(id);
+  const PARAMS = new URLSearchParams(location.search);
+  const DEMO = PARAMS.has("demo");
+  const ls = {
+    get(k, d) { try { const v = localStorage.getItem("swell." + k); return v === null ? d : v; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem("swell." + k, v); } catch (e) { /* private mode */ } },
+  };
+  const h = (tag, attrs, ...kids) => {
+    const e = document.createElement(tag);
+    for (const k in attrs || {}) {
+      if (k === "class") e.className = attrs[k];
+      else if (k.startsWith("on")) e.addEventListener(k.slice(2), attrs[k]);
+      else if (k in e && typeof attrs[k] !== "string") e[k] = attrs[k];
+      else e.setAttribute(k, attrs[k]);
+    }
+    for (const c of kids) if (c != null) e.append(c);
+    return e;
+  };
+
+  /* ---------- state ---------- */
+  const S = {
+    banks: Array.from({ length: SW.BANKS }, (_, i) => X.defaultBank(i)),
+    dev: new Array(SW.BANKS).fill(null),     /* the blob last read from / sent to the E16 */
+    full: new Array(SW.BANKS).fill(false),   /* imported: send replaces the snapshots too */
+    touched: new Array(SW.BANKS).fill(false),
+    sel: 0,
+    tab: "ctl",
+    hello: null,
+    ev: null,
+    lastEvAt: 0,
+    conn: "off",
+    busy: false,
+    slotMode: "press",
+    drag: null,          /* { ctl, value, until } while a ring is being dragged */
+  };
+  /* edited here and not sent: differs from the E16's copy (or, before
+   * anything was read, touched at all) */
+  const edited = (i) => (S.dev[i] ? !sameBytes(X.encodeBank(S.banks[i]), S.dev[i]) : S.touched[i] || S.full[i]);
+  function sameBytes(a, b) { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; }
+
+  /* ---------- log ---------- */
+  function log(msg, err) {
+    const li = h("li", { class: err ? "err" : "" }, h("span", { class: "t" }, new Date().toLocaleTimeString()), msg);
+    const ul = $("log");
+    ul.prepend(li);
+    while (ul.children.length > 200) ul.lastChild.remove();
+  }
+  $("clearLog").onclick = () => { $("log").textContent = ""; };
+  const pill = $("pill");
+  function setPill(s, text) { pill.dataset.s = s; pill.lastElementChild.textContent = text; pill.title = text; }
+  function notice(title, html) {
+    const n = $("notice");
+    if (!title) { n.hidden = true; return; }
+    n.innerHTML = `<h2></h2>${html}`;
+    n.querySelector("h2").textContent = title;
+    n.hidden = false;
+  }
+
+  /* ---------- transport ---------- */
+  let client = null, access = null, input = null, output = null, demo = null;
+  function makeClient(send) {
+    const c = new X.Client(send);
+    c.onEvent = onEvent;
+    c.onStray = (m) => { if (m.cmd === CMD.NAK) log(`late NAK ${X.ERR_NAMES[m.raw?.[1]] || ""} for ${X.CMD_NAMES[m.raw?.[0]] || "?"}`, true); };
+    return c;
+  }
+  function reportErr(what, e) {
+    log(`${what}: ${e.message}`, true);
+  }
+
+  function isE16(p) { return /E16/i.test(p.name || "") && !/FW Update/i.test(p.name || ""); }
+  function fillPorts() {
+    for (const [sel, map, key] of [[$("inSel"), access.inputs, "in"], [$("outSel"), access.outputs, "out"]]) {
+      const ports = [...map.values()].filter((p) => p.state !== "disconnected");
+      const want = ls.get(key, "");
+      const prev = sel.value;
+      sel.textContent = "";
+      sel.append(h("option", { value: "" }, "— none —"));
+      for (const p of ports) sel.append(h("option", { value: p.id }, p.name));
+      const pick = ports.find((p) => p.id === prev) || ports.find((p) => p.name === want) ||
+        ports.find((p) => isE16(p) && /Launcher/i.test(p.name)) || ports.find(isE16);
+      sel.value = pick ? pick.id : "";
+    }
+  }
+  function attach(force) {
+    const i = access.inputs.get($("inSel").value) || null, o = access.outputs.get($("outSel").value) || null;
+    if (!force && i === input && o === output && client) return;
+    if (input) input.onmidimessage = null;
+    if (client) client.reset("port changed");
+    input = i; output = o;
+    S.hello = null;
+    if (!i || !o) {
+      client = null;
+      setPill("wait", "Looking for the E16…");
+      notice("Connect the E16", "<p>Plug the E16 in over USB and start <b>Swell</b> on it. The editor picks the ports whose name contains “E16”; choose others at the top right.</p>");
+      return;
+    }
+    client = makeClient((bytes) => output.send(bytes));
+    input.onmidimessage = (ev) => { if (ev.data[0] === 0xF0 && client) client.handle(ev.data); };
+    connect();
+  }
+  ["inSel", "outSel"].forEach((id) => $(id).addEventListener("change", () => {
+    const sel = $(id), map = id === "inSel" ? access?.inputs : access?.outputs;
+    const p = map && map.get(sel.value);
+    ls.set(id === "inSel" ? "in" : "out", p ? p.name : "");
+    if (access) attach(true);
+  }));
+  $("reconnect").onclick = () => { if (DEMO) connect(); else if (access) { fillPorts(); attach(true); } };
+
+  let connecting = null;   /* the client a connect() is running for */
+  async function connect() {
+    if (!client || connecting === client) return;
+    const c = client;
+    connecting = c;
+    try {
+      setPill(DEMO ? "demo" : "wait", "Saying hello…");
+      let hi = null;
+      while (!hi && c === client) {
+        try { hi = await X.hello(c); }
+        catch (e) {
+          if (c !== client) return;
+          setPill("wait", "No answer — is Swell running?");
+          notice("Swell isn't answering", `<p>The ports are open (<code>${(output && output.name) || "?"}</code>) but there's no reply to HELLO. Start <b>Swell</b> from the launcher menu on the E16; this page keeps trying.</p>`);
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
+      if (c !== client) return;
+      if (hi.ver !== SW.VER || hi.blob_size !== SW.BLOB_SIZE || hi.banks !== SW.BANKS) {
+        setPill("bad", `Protocol ${hi.ver}, blob ${hi.blob_size}: not this editor's`);
+        notice("Version mismatch", `<p>The E16 speaks protocol ${hi.ver} with ${hi.blob_size}-byte banks; this editor knows protocol ${SW.VER} with ${SW.BLOB_SIZE}. Use the editor that came with the app.</p>`);
+        return;
+      }
+      S.hello = hi;
+      notice(null);
+      log(`HELLO: ${hi.name} v${hi.ver}, bank ${hi.current_bank + 1}, layer ${"AB"[hi.layer]}`);
+      for (let b = 0; b < SW.BANKS; b++) {
+        setPill(DEMO ? "demo" : "wait", `Reading bank ${b + 1} of ${SW.BANKS}…`);
+        await loadBank(c, b, true);
+      }
+      if (S.sel === 0 && hi.current_bank) S.sel = hi.current_bank;
+      renderBanks(); renderSetup();
+      await X.subscribe(c, true);
+      S.lastEvAt = performance.now();
+      setPill(DEMO ? "demo" : "live", DEMO ? "Demo (no E16)" : `Connected · ${input.name}`);
+    } catch (e) {
+      if (!e.reset) { reportErr("connect", e); setPill("bad", "Connection failed: " + e.message); }
+    } finally {
+      if (connecting === c) connecting = null;
+    }
+  }
+  /* Read bank b; keeps local edits unless replace. */
+  async function loadBank(c, b, replace) {
+    const blob = await X.readBank(c, b);
+    const d = X.decodeBank(blob);
+    if (!d.ok) { log(`bank ${b + 1}: the E16 sent a bad blob (${d.err})`, true); return; }
+    const keep = !replace && edited(b);
+    S.dev[b] = blob;
+    if (!keep) { S.banks[b] = d.bank; S.full[b] = false; S.touched[b] = false; }
+    if (b === S.sel && !keep) renderSetup(); else renderBanks();
+  }
+  /* keepalive: re-subscribe if the EVENTs stop (the app restarted, say) */
+  setInterval(async () => {
+    if (!client || !S.hello || connecting || S.busy) return;
+    if (performance.now() - S.lastEvAt > 3000) {
+      try { await X.subscribe(client, true); S.lastEvAt = performance.now(); }
+      catch (e) { setPill("wait", "Lost contact — retrying"); S.hello = null; S.ev = null; renderLive(); connect(); }
+    }
+  }, 1000);
+  window.addEventListener("pagehide", () => { if (client && S.hello) X.subscribe(client, false).catch(() => {}); });
+
+  /* ---------- events ---------- */
+  let refreshing = new Set();
+  function onEvent(ev) {
+    const prev = S.ev;
+    S.ev = ev;
+    S.lastEvAt = performance.now();
+    /* the E16 stored a slot: re-read that bank (only if not edited here) */
+    if (prev && prev.bank === ev.bank && prev.stored_mask !== ev.stored_mask) scheduleRefresh(ev.bank);
+    else if (prev && prev.bank === ev.bank && ev.dirty && !prev.dirty) scheduleRefresh(ev.bank);
+    if (!prev || prev.bank !== ev.bank) renderBanks();
+    dirtyLive = true;
+  }
+  function scheduleRefresh(b) {
+    if (refreshing.has(b) || !client || S.busy) return;
+    refreshing.add(b);
+    setTimeout(async () => {
+      try { if (client && !S.busy) await loadBank(client, b, false); } catch (e) { reportErr(`refresh bank ${b + 1}`, e); }
+      refreshing.delete(b);
+      dirtyLive = true;
+    }, 150);
+  }
+
+  /* ---------- bank list ---------- */
+  function renderBanks() {
+    const ul = $("bankList");
+    ul.textContent = "";
+    for (let b = 0; b < SW.BANKS; b++) {
+      const li = h("li", { class: (b === S.sel ? "sel " : "") + (S.ev && S.ev.bank === b ? "devcur" : ""), title: "Edit this bank",
+        onclick: () => { S.sel = b; renderBanks(); renderSetup(); } },
+        h("span", { class: "n" }, String(b + 1).padStart(2, "0")),
+        h("span", { class: "nm" }, S.banks[b].name || " "),
+        h("span", { class: "ed" }, edited(b) ? "✎" : ""),
+        h("span", { class: "cur" }));
+      ul.append(li);
+    }
+  }
+
+  /* ---------- live view ---------- */
+  const rings = [];       /* 32 */
+  const togBtns = [];     /* 16 */
+  const slotBtns = [];    /* 15 */
+  let dirtyLive = true;
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  let colors = {};
+  function readColors() { colors = { a: css("--a"), b: css("--b"), off: css("--led-off"), ghost: css("--ghost"), ink: css("--ink"), faint: css("--faint") }; }
+  readColors();
+  matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { readColors(); for (const r of rings) r.sig = ""; dirtyLive = true; });
+
+  function buildLive() {
+    const grid = $("rings");
+    for (let layer = 0; layer < 2; layer++) {
+      const lab = h("button", { class: "rowlab " + "ab"[layer], type: "button", title: `Layer ${"AB"[layer]}: make the encoders edit it`,
+        onclick: () => sendAction(ACT.LAYER, layer, 0) }, "AB"[layer]);
+      grid.append(lab);
+      for (let e = 0; e < 16; e++) {
+        const c = layer * 16 + e;
+        if (e === 8) grid.append(h("button", { class: "rowlab r2 " + "ab"[layer], type: "button", onclick: () => sendAction(ACT.LAYER, layer, 0) }, "AB"[layer]));
+        const cv = h("canvas", { width: 128, height: 128 });
+        const nm = h("span", { class: "nm" }), val = h("span", { class: "val" });
+        const box = h("div", { class: "ring" }, cv, nm, val);
+        grid.append(box);
+        const r = { c, cv, nm, val, box, sig: "" };
+        rings.push(r);
+        dragRing(r);
+      }
+    }
+    grid.append(h("span"));
+    for (let t = 0; t < 16; t++) {
+      if (t === 8) grid.append(h("span", { class: "rowlab r2", style: "visibility:hidden" }));
+      const b = h("button", { class: "tog", type: "button", title: `Toggle ${t + 1}`, onclick: () => {
+        if (!S.ev) return;
+        sendAction(ACT.SET_TOGGLE, t, (S.ev.toggles >> t) & 1 ? 0 : 1);
+      } });
+      grid.append(b);
+      togBtns.push(b);
+    }
+    const sl = $("slots");
+    for (let s = 0; s < SW.SLOTS; s++) {
+      const fill = h("span", { class: "fill" });
+      const sn = h("span", { class: "sn" }, String(s + 1));
+      const sf = h("span", { class: "sf" });
+      const b = h("button", { class: "slot empty", type: "button", onclick: (ev) => slotClick(s, ev) }, fill, sn, sf);
+      b._fill = fill; b._sn = sn; b._sf = sf;
+      sl.append(b);
+      slotBtns.push(b);
+    }
+    const ticks = $("cycleTicks");
+    ticks.textContent = "";
+  }
+
+  function setSlotMode(m) {
+    S.slotMode = S.slotMode === m ? "press" : m;
+    $("mJump").classList.toggle("on", S.slotMode === "jump");
+    $("mStore").classList.toggle("on", S.slotMode === "store");
+  }
+  $("mJump").onclick = () => setSlotMode("jump");
+  $("mStore").onclick = () => setSlotMode("store");
+  $("cancelArm").onclick = () => sendAction(ACT.CANCEL_ARM, 0, 0);
+  function slotClick(s, ev) {
+    let act = ACT.PRESS;
+    if (S.slotMode === "store") act = ACT.STORE;
+    else if (S.slotMode === "jump" || ev.shiftKey) act = ACT.JUMP;
+    if (S.slotMode !== "press") setSlotMode(S.slotMode);
+    /* PRESS isn't idempotent (a second press jumps): no retry */
+    sendAction(act, s, 0, act === ACT.PRESS ? { retries: 0 } : undefined);
+  }
+  function sendAction(act, a, b, o) {
+    if (!client || !S.hello) { log("not connected", true); return Promise.resolve(); }
+    return X.action(client, act, a, b, o).catch((e) => reportErr("action", e));
+  }
+
+  /* SET_VALUE: at most ~30 a second per control, latest value wins */
+  const pendingVal = new Map();
+  let valTimer = 0, valLast = 0;
+  function queueValue(c, v) {
+    pendingVal.set(c, v);
+    if (valTimer) return;
+    const wait = Math.max(0, 33 - (performance.now() - valLast));
+    valTimer = setTimeout(flushValues, wait);
+  }
+  function flushValues() {
+    valTimer = 0;
+    valLast = performance.now();
+    if (!client || !S.hello) { pendingVal.clear(); return; }
+    for (const [c, v] of pendingVal)
+      X.action(client, ACT.SET_VALUE, c, v, { key: "v" + c, retries: 0 }).catch((e) => { if (!e.reset) reportErr("set value", e); });
+    pendingVal.clear();
+  }
+  function shownValue(c) {
+    if (S.drag && S.drag.ctl === c && (S.drag.active || performance.now() < S.drag.until)) return S.drag.value;
+    return S.ev ? S.ev.live[c] : 0;
+  }
+  function dragRing(r) {
+    const cv = r.cv;
+    let y0 = 0, v0 = 0, id = null;
+    cv.addEventListener("pointerdown", (ev) => {
+      if (!S.ev) return;
+      id = ev.pointerId;
+      cv.setPointerCapture(id);
+      y0 = ev.clientY; v0 = shownValue(r.c);
+      S.drag = { ctl: r.c, value: v0, active: true, until: 0, fine: ev.shiftKey };
+      ev.preventDefault();
+    });
+    cv.addEventListener("pointermove", (ev) => {
+      if (id !== ev.pointerId || !S.drag || S.drag.ctl !== r.c) return;
+      const k = ev.shiftKey ? 8 : 64;               /* internal units per pixel */
+      const v = Math.max(0, Math.min(SW.VMAX, Math.round(v0 + (y0 - ev.clientY) * k)));
+      if (ev.shiftKey !== S.drag.fine) { y0 = ev.clientY; v0 = S.drag.value; S.drag.fine = ev.shiftKey; return; }
+      if (v !== S.drag.value) { S.drag.value = v; queueValue(r.c, v); dirtyLive = true; }
+    });
+    const end = (ev) => {
+      if (id !== ev.pointerId) return;
+      id = null;
+      if (S.drag && S.drag.ctl === r.c) { S.drag.active = false; S.drag.until = performance.now() + 400; }
+    };
+    cv.addEventListener("pointerup", end);
+    cv.addEventListener("pointercancel", end);
+    cv.addEventListener("wheel", (ev) => {
+      if (!S.ev) return;
+      ev.preventDefault();
+      const step = ev.shiftKey ? 8 : 128;
+      const v = Math.max(0, Math.min(SW.VMAX, shownValue(r.c) + (ev.deltaY < 0 ? step : -step)));
+      S.drag = { ctl: r.c, value: v, active: false, until: performance.now() + 400 };
+      queueValue(r.c, v);
+      dirtyLive = true;
+    }, { passive: false });
+  }
+
+  /* One ring: 16 LEDs over 300 degrees from 7 o'clock, a gap at the bottom
+   * where the toggle LED sits; the value arc in the layer's colour; the
+   * ghost dot at the target. */
+  const LED_FIRST = 210, LED_STEP = 20;
+  function drawRing(r, value, target, tog, layerCur) {
+    const sig = `${value}|${target}|${tog}|${layerCur}`;
+    if (sig === r.sig) return;
+    r.sig = sig;
+    const g = r.cv.getContext("2d");
+    const W = r.cv.width, cx = W / 2, cy = W / 2;
+    g.clearRect(0, 0, W, W);
+    const col = r.c < 16 ? colors.a : colors.b;
+    const ang = (deg) => (deg - 90) * Math.PI / 180;
+    const lit = value / SW.VMAX * 16;
+    /* the track */
+    g.lineCap = "round";
+    g.lineWidth = 3;
+    g.strokeStyle = colors.off;
+    g.beginPath(); g.arc(cx, cy, 34, ang(LED_FIRST - 10), ang(LED_FIRST + 15 * LED_STEP + 10)); g.stroke();
+    /* the exact value, a thin inner arc */
+    if (value > 0) {
+      g.strokeStyle = col;
+      g.globalAlpha = layerCur ? 1 : 0.7;
+      g.beginPath(); g.arc(cx, cy, 34, ang(LED_FIRST - 10), ang(LED_FIRST - 10 + value / SW.VMAX * 320)); g.stroke();
+      g.globalAlpha = 1;
+    }
+    /* LEDs */
+    for (let l = 0; l < 16; l++) {
+      const a = ang(LED_FIRST + l * LED_STEP);
+      const x = cx + 48 * Math.cos(a), y = cy + 48 * Math.sin(a);
+      const f = Math.max(0, Math.min(1, lit - l));
+      g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2);
+      g.fillStyle = colors.off; g.fill();
+      if (f > 0) {
+        g.globalAlpha = (layerCur ? 1 : 0.6) * (0.25 + 0.75 * f);
+        g.fillStyle = col;
+        g.shadowColor = col; g.shadowBlur = layerCur ? 10 : 0;
+        g.fill();
+        g.shadowBlur = 0; g.globalAlpha = 1;
+      }
+    }
+    /* the toggle LED */
+    {
+      const x = cx, y = cy + 48;
+      g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2);
+      g.fillStyle = tog ? colors.ink : colors.off;
+      if (tog) { g.shadowColor = colors.ink; g.shadowBlur = 8; }
+      g.fill(); g.shadowBlur = 0;
+    }
+    /* the ghost target */
+    if (target >= 0) {
+      const a = ang(LED_FIRST - 10 + target / SW.VMAX * 320);
+      const x = cx + 34 * Math.cos(a), y = cy + 34 * Math.sin(a);
+      g.beginPath(); g.arc(x, y, 6.5, 0, Math.PI * 2);
+      g.lineWidth = 3; g.strokeStyle = colors.ghost; g.stroke();
+    }
+    /* the number in the middle */
+    g.fillStyle = colors.faint;
+    g.font = "600 22px system-ui, sans-serif";
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(String(Math.round(value / SW.VMAX * 100)), cx, cy + 1);
+  }
+
+  function slotLabel(s) { return s < 0 ? "—" : String(s + 1); }
+  function renderLive() {
+    const ev = S.ev;
+    const bank = ev ? S.banks[ev.bank] : S.banks[S.sel];
+    $("stBank").textContent = ev ? `${ev.bank + 1} ${bank.name}` : "—";
+    $("stSlot").textContent = ev ? (ev.current_slot < 0 ? "—" : slotLabel(ev.current_slot) + (ev.modified ? "*" : "")) : "—";
+    $("stLayer").textContent = ev ? "AB"[ev.layer] : "—";
+    $("stBpm").textContent = ev ? (ev.bpm_x10 / 10).toFixed(1) : "—";
+    $("stClock").textContent = ev ? (ev.clock_source ? "EXT" : "INT") + (ev.running ? " ▶" : " ■") : "—";
+    $("stDirtyWrap").hidden = !(ev && ev.dirty);
+    /* cycle */
+    const cb = $("cycleBar");
+    if (ev && ev.cycle_clocks) {
+      const bars = ev.cycle_clocks / (4 * SW.PPQN);
+      const frac = ev.cycle_pos / ev.cycle_clocks;
+      cb.querySelector("i").style.width = (frac * 100).toFixed(2) + "%";
+      const beat = Math.floor(ev.cycle_pos / SW.PPQN);
+      const left = (ev.cycle_clocks - ev.cycle_pos) / SW.PPQN;
+      $("cycleTxt").textContent = `bar ${Math.floor(beat / 4) + 1}.${(beat % 4) + 1} of ${bars}` + (ev.armed_slot >= 0 ? ` · drop in ${left.toFixed(1)} beats` : "");
+      const ticks = $("cycleTicks");
+      if (ticks.childElementCount !== bars) { ticks.textContent = ""; for (let i = 0; i < bars; i++) ticks.append(h("b")); }
+    } else { cb.querySelector("i").style.width = "0"; $("cycleTxt").textContent = "cycle"; }
+    /* fade / armed */
+    const fb = $("fadeBar");
+    let txt = "—", w = 0;
+    if (ev) {
+      if (ev.fading && ev.fade_slot >= 0) {
+        w = ev.fade_progress / 65535;
+        const n = bank.snap[ev.fade_slot];
+        txt = `fading → slot ${ev.fade_slot + 1} · ${Math.round(w * 100)}% · ${X.FADE_NAMES[n.fade]} ${X.CURVE_NAMES[n.curve]}`;
+      }
+      if (ev.pending_jump >= 0) txt = (ev.fading ? txt + " · " : "") + `jump to ${ev.pending_jump + 1} waiting for the ${X.JQ_NAMES[bank.jump_quant]}`;
+      if (ev.armed_slot >= 0) txt = (w ? txt + " · " : "") + `armed: slot ${ev.armed_slot + 1}` + (ev.running ? "" : " (clock stopped)");
+    }
+    fb.querySelector("i").style.width = (w * 100).toFixed(1) + "%";
+    $("fadeTxt").textContent = txt;
+    /* rings */
+    const tg = ev && ev.has_targets ? ev.targets : null;
+    for (const r of rings) {
+      const v = shownValue(r.c);
+      const layerCur = ev ? (r.c >> 4) === ev.layer : r.c < 16;
+      const tog = ev ? (ev.toggles >> (r.c & 15)) & 1 : 0;
+      drawRing(r, v, tg ? tg[r.c] : -1, tog, layerCur);
+      const k = bank.ctl[r.c];
+      r.nm.textContent = k.name || " ";
+      r.val.textContent = k.type === T.OFF ? "off" : String(X.outValue(k, v));
+      r.box.classList.toggle("dim", !layerCur);
+    }
+    document.querySelectorAll(".rowlab").forEach((b) => {
+      const l = b.classList.contains("a") ? 0 : b.classList.contains("b") ? 1 : -1;
+      b.classList.toggle("cur", !!ev && l === ev.layer);
+    });
+    for (let t = 0; t < 16; t++) {
+      togBtns[t].textContent = bank.tog[t].name || " ";
+      togBtns[t].classList.toggle("on", !!ev && ((ev.toggles >> t) & 1) === 1);
+    }
+    for (let s = 0; s < SW.SLOTS; s++) {
+      const b = slotBtns[s];
+      const stored = ev ? (ev.stored_mask >> s) & 1 : bank.snap[s].stored;
+      const cur = ev && ev.current_slot === s;
+      b.className = "slot " + (stored ? "stored" : "empty") + (cur ? " current" : "") + (ev && ev.armed_slot === s ? " armed" : "") +
+        (ev && ev.pending_jump === s ? " pending" : "");
+      b._sn.textContent = String(s + 1) + (cur && ev.modified ? "*" : "");
+      b._sf.textContent = X.FADE_SHORT[bank.snap[s].fade] + " " + ["lin", "ease", "S", "hold"][bank.snap[s].curve];
+      b._fill.style.width = ev && ev.fading && ev.fade_slot === s ? (ev.fade_progress / 655.35).toFixed(1) + "%" : "0";
+      b.title = `Slot ${s + 1}: ${stored ? "stored" : "empty"}, fade ${X.FADE_NAMES[bank.snap[s].fade]}, ${X.CURVE_NAMES[bank.snap[s].curve]}`;
+    }
+  }
+  function frame() {
+    if (S.drag && !S.drag.active && S.drag.until && performance.now() > S.drag.until) { S.drag = null; dirtyLive = true; }
+    if (dirtyLive) { dirtyLive = false; renderLive(); }
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- setup ---------- */
+  const cycleSel = $("fCycle"), jqSel = $("fJq");
+  X.CYCLE_BARS.forEach((b, i) => cycleSel.append(h("option", { value: i }, `${b} bar${b > 1 ? "s" : ""}`)));
+  X.JQ_NAMES.forEach((n, i) => jqSel.append(h("option", { value: i }, n)));
+  const PORTS = [["TRS1", 1], ["TRS2", 2], ["USB", 4]];
+  function portBoxes(obj, key, onchange) {
+    const span = h("span", { class: "chk" });
+    for (const [n, bit] of PORTS) {
+      const cb = h("input", { type: "checkbox", checked: !!(obj[key] & bit), title: n });
+      cb.addEventListener("change", () => { obj[key] = cb.checked ? obj[key] | bit : obj[key] & ~bit; onchange(); });
+      span.append(h("label", {}, cb, n));
+    }
+    return span;
+  }
+  function nameInput(obj) {
+    const i = h("input", { type: "text", maxLength: 8, value: obj.name, spellcheck: false });
+    i.addEventListener("input", () => {
+      const c = X.cleanName(i.value.replace(/[^\x20-\x7E]/g, ""));
+      if (c !== i.value) i.value = c;
+      obj.name = c;
+      changed();
+    });
+    return i;
+  }
+  /* A number field shown as base..base+hi-lo (channel 1-16), clamped on change. */
+  function numInput(obj, key, lo, hi, o) {
+    o = o || {};
+    const base = o.base || 0;
+    const i = h("input", { type: "number", min: lo + base, max: hi + base, step: 1, value: obj[key] + base, class: o.cls || "" });
+    i.addEventListener("change", () => {
+      let v = Math.round(Number(i.value) - base);
+      if (!Number.isFinite(v)) v = obj[key];
+      const lim = o.limit ? o.limit() : [lo, hi];
+      v = Math.max(lim[0], Math.min(lim[1], v));
+      obj[key] = v;
+      i.value = v + base;
+      changed();
+    });
+    i._sync = () => { const lim = o.limit ? o.limit() : [lo, hi]; i.min = lim[0] + base; i.max = lim[1] + base; i.value = obj[key] + base; };
+    i._sync();
+    return i;
+  }
+  function select(obj, key, names, onch) {
+    const s = h("select", {});
+    names.forEach((n, i) => s.append(h("option", { value: i }, n)));
+    s.value = obj[key];
+    s.addEventListener("change", () => { obj[key] = Number(s.value); if (onch) onch(); changed(); });
+    return s;
+  }
+  function changed() { S.touched[S.sel] = true; renderBanks(); updateSetupHead(); dirtyLive = true; }
+
+  function bankFields() {
+    const b = S.banks[S.sel];
+    const nm = $("fName");
+    nm.value = b.name;
+    nm.oninput = () => {
+      const c = X.cleanName(nm.value.replace(/[^\x20-\x7E]/g, ""));
+      if (c !== nm.value) nm.value = c;
+      b.name = c; changed();
+    };
+    cycleSel.value = b.cycle; cycleSel.onchange = () => { b.cycle = Number(cycleSel.value); changed(); };
+    jqSel.value = b.jump_quant; jqSel.onchange = () => { b.jump_quant = Number(jqSel.value); changed(); };
+    const bpm = $("fBpm");
+    bpm.value = (b.bpm_x10 / 10).toFixed(1);
+    bpm.onchange = () => {
+      let v = Math.round(Number(bpm.value) * 10);
+      if (!Number.isFinite(v)) v = b.bpm_x10;
+      b.bpm_x10 = Math.max(400, Math.min(3000, v));
+      bpm.value = (b.bpm_x10 / 10).toFixed(1);
+      changed();
+    };
+    const ck = $("fClock");
+    while (ck.childNodes.length > 1) ck.lastChild.remove();
+    ck.append(portBoxes(b, "clock_out", changed));
+  }
+
+  function ctlTable(b) {
+    const tb = h("tbody");
+    const t = h("table", { class: "grid" },
+      h("thead", {}, h("tr", {}, ...["#", "Name", "Type", "Ports", "Ch", "Number", "Min", "Max", ""].map((x) => h("th", {}, x)))), tb);
+    b.ctl.forEach((k, c) => {
+      const num = numInput(k, "number", 0, 16383, { limit: () => [0, X.numHi(k.type)] });
+      const mn = numInput(k, "min", 0, 16383, { limit: () => [0, X.valHi(k.type)] });
+      const mx = numInput(k, "max", 0, 16383, { limit: () => [0, X.valHi(k.type)] });
+      let wasWide = X.isWide(k.type);
+      const ty = select(k, "type", X.TYPE_NAMES, () => {
+        /* moving between 7 and 14 bits rescales min/max (127 <-> 16383) */
+        const wide = X.isWide(k.type);
+        if (wide && !wasWide) { k.min = Math.min(16383, k.min * 129); k.max = Math.min(16383, k.max * 129); }
+        else if (!wide && wasWide) { k.min >>= 7; k.max >>= 7; }
+        k.number = Math.min(k.number, X.numHi(k.type));
+        k.min = Math.min(k.min, X.valHi(k.type)); k.max = Math.min(k.max, X.valHi(k.type));
+        wasWide = wide;
+        num._sync(); mn._sync(); mx._sync();
+      });
+      const hint = h("span", { class: "hint", style: "margin:0" }, k.type === T.CC14 ? `LSB ${k.number + 32}` : "");
+      ty.addEventListener("change", () => { hint.textContent = k.type === T.CC14 ? `LSB ${k.number + 32}` : ""; });
+      num.addEventListener("change", () => { hint.textContent = k.type === T.CC14 ? `LSB ${k.number + 32}` : ""; });
+      tb.append(h("tr", { class: (c < 16 ? "layerA" : "layerB") + (c === 16 ? " sep" : "") },
+        h("td", {}, (c < 16 ? "A" : "B") + ((c & 15) + 1)),
+        h("td", {}, nameInput(k)), h("td", {}, ty), h("td", {}, portBoxes(k, "ports", changed)),
+        h("td", {}, numInput(k, "channel", 0, 15, { base: 1, cls: "ch" })), h("td", {}, num), h("td", {}, mn), h("td", {}, mx),
+        h("td", {}, hint)));
+    });
+    return t;
+  }
+  function togTable(b) {
+    const tb = h("tbody");
+    const t = h("table", { class: "grid" },
+      h("thead", {}, h("tr", {}, ...["#", "Name", "Ports", "Ch", "CC", "Off", "On"].map((x) => h("th", {}, x)))), tb);
+    b.tog.forEach((g, i) => tb.append(h("tr", {},
+      h("td", {}, "T" + (i + 1)), h("td", {}, nameInput(g)), h("td", {}, portBoxes(g, "ports", changed)),
+      h("td", {}, numInput(g, "channel", 0, 15, { base: 1, cls: "ch" })), h("td", {}, numInput(g, "cc", 0, 127)),
+      h("td", {}, numInput(g, "off", 0, 127)), h("td", {}, numInput(g, "on", 0, 127)))));
+    return t;
+  }
+  function snapTable(b) {
+    const tb = h("tbody");
+    const t = h("table", { class: "grid", style: "min-width:420px" },
+      h("thead", {}, h("tr", {}, ...["#", "Stored", "Fade", "Curve"].map((x) => h("th", {}, x)))), tb);
+    b.snap.forEach((n, s) => {
+      const devStored = S.ev && S.ev.bank === S.sel ? (S.ev.stored_mask >> s) & 1 : n.stored;
+      tb.append(h("tr", {},
+        h("td", {}, String(s + 1)),
+        h("td", { title: "Read-only: store slots on the E16 or with the Store button above" }, devStored ? "● stored" : "○ empty"),
+        h("td", {}, select(n, "fade", X.FADE_NAMES)), h("td", {}, select(n, "curve", X.CURVE_NAMES))));
+    });
+    return t;
+  }
+  document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => { S.tab = t.dataset.tab; renderSetup(); }));
+  function renderSetup() {
+    const b = S.banks[S.sel];
+    bankFields();
+    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === S.tab));
+    const body = $("tabBody");
+    body.textContent = "";
+    body.append(S.tab === "ctl" ? ctlTable(b) : S.tab === "tog" ? togTable(b) : snapTable(b));
+    renderBanks();
+    updateSetupHead();
+    dirtyLive = true;
+  }
+  function updateSetupHead() {
+    $("setupTitle").textContent = `Bank ${S.sel + 1} setup` + (edited(S.sel) ? " · edited" : "");
+    const on = !!(client && S.hello) && !S.busy;
+    $("sendBtn").disabled = !on;
+    $("revertBtn").disabled = !on;
+    $("playBank").disabled = !on;
+  }
+  function sendMsg(t, err) { const m = $("sendMsg"); m.textContent = t; m.classList.toggle("err", !!err); }
+  function progress(f) { const p = $("sendProg"); p.hidden = f === null; if (f !== null) p.firstChild.style.width = (f * 100).toFixed(0) + "%"; }
+
+  $("sendBtn").onclick = async () => {
+    if (!client || S.busy) return;
+    const b = S.sel, c = client;
+    S.busy = true; updateSetupHead();
+    try {
+      sendMsg("reading the E16's copy…"); progress(0);
+      let send;
+      if (S.full[b]) send = X.cloneBank(S.banks[b]);
+      else {
+        const d = X.decodeBank(await X.readBank(c, b, (f) => progress(f * 0.3)));
+        if (!d.ok) throw new Error("the E16 sent a bad blob (" + d.err + ")");
+        send = X.mergeConfig(d.bank, S.banks[b]);   /* keep slots stored on the E16 meanwhile */
+      }
+      X.sanitizeBank(send);
+      const blob = X.encodeBank(send);
+      sendMsg("writing…");
+      await X.writeBank(c, b, blob, (f) => progress(0.3 + f * 0.7));
+      S.dev[b] = blob; S.banks[b] = send; S.full[b] = false; S.touched[b] = false;
+      sendMsg(`sent bank ${b + 1} ✓`);
+      log(`sent bank ${b + 1}`);
+      if (b === S.sel) renderSetup();
+    } catch (e) {
+      sendMsg(e.message, true);
+      reportErr(`send bank ${b + 1}`, e);
+    } finally {
+      S.busy = false; progress(null); updateSetupHead();
+    }
+  };
+  $("revertBtn").onclick = async () => {
+    if (!client || S.busy) return;
+    const b = S.sel;
+    S.busy = true; updateSetupHead();
+    try {
+      sendMsg("reading…"); progress(0);
+      const blob = await X.readBank(client, b, progress);
+      const d = X.decodeBank(blob);
+      if (!d.ok) throw new Error("bad blob from the E16 (" + d.err + ")");
+      S.dev[b] = blob; S.banks[b] = d.bank; S.full[b] = false; S.touched[b] = false;
+      sendMsg("reverted to the E16's copy");
+      renderSetup();
+    } catch (e) { sendMsg(e.message, true); reportErr("revert", e); }
+    finally { S.busy = false; progress(null); updateSetupHead(); }
+  };
+  $("playBank").onclick = () => sendAction(ACT.SELECT_BANK, S.sel, 0);
+  $("exportBtn").onclick = () => {
+    const b = S.banks[S.sel];
+    const blob = new Blob([X.encodeBank(b)], { type: "application/octet-stream" });
+    const a = h("a", { href: URL.createObjectURL(blob), download: `bank${String(S.sel).padStart(2, "0")}.bin` });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  $("importBtn").onclick = () => $("importFile").click();
+  $("importFile").addEventListener("change", async () => {
+    const f = $("importFile").files[0];
+    $("importFile").value = "";
+    if (!f) return;
+    const buf = new Uint8Array(await f.arrayBuffer());
+    const d = X.decodeBank(buf);
+    if (!d.ok) {
+      const why = { size: `it is ${buf.length} bytes, not ${SW.BLOB_SIZE}`, magic: "it isn't a Swell bank (no SWB1)", crc: "its checksum is wrong (damaged)" }[d.err];
+      sendMsg(`can't import ${f.name}: ${why}`, true);
+      log(`import ${f.name}: ${why}`, true);
+      return;
+    }
+    S.banks[S.sel] = d.bank; S.full[S.sel] = true;
+    sendMsg(`imported ${f.name} — Send to put it on the E16 (slots included)`);
+    renderSetup();
+  });
+
+  /* ---------- start ---------- */
+  buildLive();
+  renderBanks();
+  renderSetup();
+  requestAnimationFrame(frame);
+
+  async function start() {
+    if (DEMO) {
+      demo = new X.DemoDevice();
+      $("inSel").append(h("option", {}, "Demo E16")); $("outSel").append(h("option", {}, "Demo E16"));
+      client = makeClient((bytes) => {
+        const copy = Uint8Array.from(bytes);
+        setTimeout(() => { const r = demo.handle(copy); if (r) client.handle(r); }, 2);
+      });
+      setInterval(() => {
+        const ms = performance.now();
+        demo.tick(ms);
+        const e = demo.event(ms);
+        if (e) client.handle(e);
+      }, 10);
+      connect();
+      return;
+    }
+    if (!window.isSecureContext) {
+      setPill("bad", "Needs a secure page");
+      notice("Open this page from a file or localhost", "<p>Web MIDI only works on secure pages: open the file directly, or serve it from <code>localhost</code>. <a href=\"?demo\">Try the demo</a>.</p>");
+      return;
+    }
+    if (!navigator.requestMIDIAccess) {
+      setPill("bad", "No Web MIDI in this browser");
+      notice("This browser can't talk MIDI", "<p>Use Chrome or Edge on a desktop. <a href=\"?demo\">Try the demo</a>.</p>");
+      return;
+    }
+    setPill("wait", "Asking for MIDI access…");
+    try {
+      access = await navigator.requestMIDIAccess({ sysex: true });
+    } catch (e) {
+      setPill("bad", "MIDI access blocked");
+      notice("MIDI access was blocked", "<p>The editor needs MIDI with SysEx. Allow it for this page (the icon at the left of the address bar), then reload. <a href=\"?demo\">Try the demo</a>.</p>");
+      return;
+    }
+    access.onstatechange = () => { fillPorts(); attach(false); };
+    fillPorts();
+    attach(true);
+  }
+  start();
+})();
+</script>
+</body>
+</html>

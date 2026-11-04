@@ -1,0 +1,4 @@
+build/
+build-host/
+node_modules/
+.DS_Store

@@ -1,0 +1,3 @@
+[submodule "external/e16-sdk-examples"]
+	path = external/e16-sdk-examples
+	url = https://github.com/charlesvestal/e16-sdk-examples.git
