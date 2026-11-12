@@ -19,6 +19,6 @@ include(${E16_LAUNCHER_DIR}/apps/sdk/cmake/e16app.cmake)
 
 e16_add_app(swell
     src/app.c src/ui.c
-    src/core/model.c src/core/store.c src/core/engine.c src/core/out.c src/core/proto.c
+    src/core/model.c src/core/store.c src/core/engine.c src/core/out.c src/core/proto.c src/core/fields.c
     ${E16_LAUNCHER_DIR}/src/ui/font.c)  # the launcher's 5x7 font (freestanding)
 target_include_directories(swell.elf PRIVATE src src/core ${E16_LAUNCHER_DIR}/src/ui)

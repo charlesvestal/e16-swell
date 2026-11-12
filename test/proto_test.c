@@ -678,6 +678,15 @@ static void test_state_event(void)
     CHECK(ev(t1 + 300) == 186 && rraw[1] == 0, "layer change");
     dirty_flag[0] = 0;
     CHECK(ev(t1 + 400) == 186 && rraw[24] == 0, "dirty change");
+    /* the host's edit count goes out as it is; each new count is a change */
+    dirty_flag[0] = 200;
+    CHECK(ev(t1 + 500) == 186 && rraw[24] == 200, "edit count 200");
+    dirty_flag[0] = 201;
+    CHECK(ev(t1 + 600) == 186 && rraw[24] == 201, "edit count 201");
+    dirty_flag[0] = 999;
+    CHECK(ev(t1 + 700) == 186 && rraw[24] == 255, "edit count capped at 255");
+    dirty_flag[0] = 0;
+    CHECK(ev(t1 + 800) == 186 && rraw[24] == 0, "saved");
 
     /* wrap-safe timing */
     uint32_t w = 0xFFFFFFF0u;

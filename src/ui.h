@@ -29,6 +29,13 @@ typedef struct {
     int store_slot;         /* a slot push being held in Shift mode: -1 = none */
     uint16_t store_progress;/* 0..1000 of the 600 ms hold */
     int store_done;         /* held long enough: the store happens on release */
+
+    int page;               /* SW_PAGE_* (fields.h): a settings page is up */
+    int page_ctl, page_tog; /* the knob page's control and toggle */
+    int name_field;         /* the name editor's field, or -1 */
+    int last_field;         /* the field turned in the last 2 s, or -1 */
+    int hold_enc;           /* a push being held toward a page: -1 = none */
+    uint16_t hold_progress; /* 0..1000 of the 1 s hold */
 } sw_view_t;
 
 void ui_init(const e16_api_t *api);

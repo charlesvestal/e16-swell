@@ -13,6 +13,12 @@
  *                   hold >= 600 ms + release = store; turn = fade length,
  *                   push + turn = curve
  *   enc 16          push = layer A/B, turn = bank
+ * Settings pages (core/fields.h): hold a push 1 s without turning; in
+ * play mode, the knob page (that control and toggle), in Shift mode on
+ * encoder 16, the bank page. A turn changes the field under it (pushed:
+ * coarse, or fine for the tempo); a push on a name field opens the name
+ * editor (encoders 1-8 the characters), any other push or a Shift tap
+ * goes back. The engine runs on meanwhile.
  * Leaving is the launcher's: hold Shift on its own for 5 s, then push
  * encoder 1 at its prompt; Swell saves what's unsaved, then exits. A
  * Shift tap latches the Shift surface, for hands-free slot work.
@@ -23,6 +29,7 @@
  */
 #include "e16_app.h"
 #include "engine.h"
+#include "fields.h"
 #include "model.h"
 #include "out.h"
 #include "proto.h"
@@ -69,6 +76,9 @@ void *memset(void *d, int c, size_t n)
 /* ---- state ---- */
 
 #define HOLD_STORE_MS 600u
+#define HOLD_EDIT_MS 1000u      /* a push held this long, no turn: a settings page */
+#define EDIT_SHOW_MS 150u       /* ... and the ring shows the hold after this */
+#define FIELD_SHOW_MS 2000u     /* the header shows the field last turned this long */
 #define STORE_SHOW_MS 120u      /* a slot push shows the store fill after this */
 #define SHIFT_TAP_MS 350u       /* a Shift tap (nothing else touched) latches Shift */
 #define BANK_SETTLE_MS 60u      /* steps on enc 1-15 right after a bank change are dropped */
@@ -86,6 +96,7 @@ static sw_proto_t proto;
 static int cur_bank, layer;
 static uint8_t blob[SW_BLOB_SIZE + 1];
 static uint16_t map_crc; /* the current bank's control/toggle mapping, to spot a changed one */
+static uint8_t edit_gen[SW_BANKS]; /* 1-255, moved on by every change: the EVENT's dirty byte */
 
 static const int port_map[SW_OUT_PORTS] = {E16_MIDI_TRS_1, E16_MIDI_TRS_2, E16_MIDI_USB};
 
@@ -214,6 +225,7 @@ static void bank_dirty(int b)
     if (b < 0 || b >= SW_BANKS)
         return;
     mark(&bank_save[b]);
+    edit_gen[b] = (uint8_t)(edit_gen[b] % 255u + 1u);
     if (b == cur_bank) {
         /* an editor commit may have changed what a control sends: then
          * the out layer must not dedupe against the old mapping */
@@ -382,7 +394,9 @@ static void h_bank_dirty(void *u, int b)
 static int h_is_dirty(void *u, int b)
 {
     (void)u;
-    return b >= 0 && b < SW_BANKS && bank_save[b].dirty;
+    /* unsaved: the edit count, so the editor sees each change, not just
+     * the first (it re-reads the bank when this byte changes) */
+    return b >= 0 && b < SW_BANKS && bank_save[b].dirty ? edit_gen[b] : 0;
 }
 
 static void h_select_bank(void *u, int b, uint32_t now)
@@ -459,6 +473,89 @@ static void slot_edit(int s, int d, int curve)
     bank_dirty(cur_bank);
 }
 
+/* ---- the settings pages ---- */
+
+static int page = SW_PAGE_NONE, page_ctl, page_tog;
+static int name_field = -1;            /* the name editor's field, or -1 */
+static int last_field = -1;
+static uint32_t last_field_ms;
+
+static sw_ftarget_t page_target(void)
+{
+    sw_ftarget_t t = {&banks[cur_bank], page_ctl, page_tog};
+    return t;
+}
+
+static void page_open(int pg, int enc)
+{
+    page = pg;
+    page_ctl = pg == SW_PAGE_KNOB ? layer * SW_ENCODERS + enc : 0;
+    page_tog = pg == SW_PAGE_KNOB ? enc : 0;
+    name_field = -1;
+    last_field = -1;
+    api->log(pg == SW_PAGE_KNOB ? "swell: knob page" : "swell: bank page");
+}
+
+static void page_close(void)
+{
+    if (name_field >= 0) {
+        name_field = -1;
+        return;
+    }
+    page = SW_PAGE_NONE;
+}
+
+static void page_turn(int e, int d, int alt)
+{
+    sw_ftarget_t t = page_target();
+    int f, changed;
+    if (name_field >= 0) {
+        if (e >= SW_NAME_LEN)
+            return;
+        f = name_field;
+        changed = sw_name_turn(sw_field_name(&t, f), e, d);
+    } else {
+        f = sw_field_at(page, e);
+        if (f < 0)
+            return;
+        changed = sw_field_turn(&t, f, d, alt);
+    }
+    last_field = f;
+    last_field_ms = last_ms;
+    if (changed)
+        bank_dirty(cur_bank);
+}
+
+static void page_push(int e)
+{
+    int f = sw_field_at(page, e);
+    if (name_field < 0 && sw_field_is_name(f)) {
+        name_field = f;
+        last_field = f;
+        last_field_ms = last_ms;
+    } else {
+        page_close();
+    }
+}
+
+/* A push held long enough with no turn opens a page. */
+static void page_holds(void)
+{
+    for (int e = 0; e < E16_ENC_COUNT; e++) {
+        if (!down[e] || turned[e] || consumed[e] || last_ms - press_ms[e] < HOLD_EDIT_MS)
+            continue;
+        if (!press_shift[e]) {
+            page_open(SW_PAGE_KNOB, e);
+        } else if (e == 15) {
+            page_open(SW_PAGE_BANK, e);
+        } else {
+            continue;
+        }
+        consumed[e] = 1; /* its release is not a toggle, layer or close */
+        return;
+    }
+}
+
 static void surface(uint32_t now)
 {
     int sh = api->shift_pressed();
@@ -466,8 +563,12 @@ static void surface(uint32_t now)
         shift_t0 = last_ms;
         shift_used = 0;
     } else if (!sh && shift_raw) {
-        if (!shift_used && last_ms - shift_t0 < SHIFT_TAP_MS)
-            shift_latched = !shift_latched;
+        if (!shift_used && last_ms - shift_t0 < SHIFT_TAP_MS) {
+            if (page)
+                page_close(); /* a tap backs out of a page instead */
+            else
+                shift_latched = !shift_latched;
+        }
     }
     shift_raw = sh;
     int smode = shift_mode();
@@ -485,6 +586,22 @@ static void surface(uint32_t now)
             turned[e] = consumed[e] = 0;
             if (shift_raw)
                 shift_used = 1;
+        }
+
+        if (page) {
+            if (d) {
+                if (shift_raw)
+                    shift_used = 1;
+                if (down[e])
+                    turned[e] = 1;
+                page_turn(e, d, down[e]);
+            }
+            if (!dn && down[e]) {
+                down[e] = 0;
+                if (!consumed[e] && !turned[e])
+                    page_push(e);
+            }
+            continue;
         }
 
         if (d && settle && e < 15)
@@ -542,6 +659,9 @@ static void surface(uint32_t now)
         }
     }
 
+    if (!page)
+        page_holds();
+
     if (bank_moved) {
         /* steps that came in on the slot encoders meanwhile mean nothing */
         for (int e = 0; e < SW_SLOTS; e++)
@@ -568,6 +688,22 @@ static void draw(void)
     v.store_slot = -1;
     v.store_progress = 0;
     v.store_done = 0;
+    v.page = page;
+    v.page_ctl = page_ctl;
+    v.page_tog = page_tog;
+    v.name_field = name_field;
+    v.last_field = last_field >= 0 && last_ms - last_field_ms < FIELD_SHOW_MS ? last_field : -1;
+    v.hold_enc = -1;
+    v.hold_progress = 0;
+    if (!page)
+        for (int e = 0; e < E16_ENC_COUNT; e++)
+            if (down[e] && !turned[e] && !consumed[e] && (!press_shift[e] || e == 15) &&
+                last_ms - press_ms[e] >= EDIT_SHOW_MS) {
+                /* in Shift mode the slots' own store fill shows instead */
+                v.hold_enc = e;
+                v.hold_progress = (uint16_t)((last_ms - press_ms[e]) * 1000u / HOLD_EDIT_MS);
+                break;
+            }
     for (int e = 0; e < SW_SLOTS; e++)
         if (down[e] && press_shift[e] && !turned[e] && !consumed[e] &&
             last_ms - press_ms[e] >= STORE_SHOW_MS) {

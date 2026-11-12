@@ -39,6 +39,7 @@ firmware. A web editor sets up the mapping and shows everything live.
 - **The editor:** one HTML file, using Web MIDI over USB.
   - **Live view:** the 32 rings with their targets, the cycle countdown, and click-to-arm.
   - **Setup:** a table for every control, toggle and slot.
+- **Setup on the E16 too:** every setting is also on two settings pages on the E16 itself.
 
 <p align="center">
   <img src="docs/images/editor-live.png" width="900" alt="The editor's live view: bank list, 32 rings with values and targets, toggles, 15 slots">
@@ -77,6 +78,8 @@ channel 1 to TRS 1 and USB, and the toggles send CC 80–95. Open
 | Shift + **hold** 1–15, release | **store** the current state into that slot |
 | Shift + **turn** 1–15 | that slot's fade length (push + turn: its curve) |
 | Shift + push / turn 16 | layer A/B / bank |
+| **Hold** a push 1 s (no turn) | that knob's settings page: what it sends, its toggle, its name |
+| Shift + **hold** 16 | the bank's settings page: cycle, jump quantize, tempo, clock out, channel and ports for everything |
 | Shift held on its own for 5 s | the launcher's prompt to leave (encoder 1 leaves, Swell saves first) |
 
 <p align="center">

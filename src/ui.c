@@ -18,6 +18,7 @@
 #include "ui.h"
 #include "font.h"
 #include "out.h"
+#include "fields.h"
 
 #define W E16_DISPLAY_WIDTH
 #define H E16_DISPLAY_HEIGHT
@@ -282,9 +283,38 @@ static void ring_bank(const sw_view_t *v)
     ring_set(15, v->bank_index, col, 1, 1);
 }
 
+static const uint8_t field_rgb[3] = {22, 22, 20};
+static const uint8_t name_rgb[3] = {30, 18, 0};
+static const uint8_t hold_rgb[3] = {34, 34, 34};
+
+/* A settings page: each field's ring an arc to its value, a name field
+ * a dim full ring; the field last turned brighter. */
+static void ring_page(const sw_view_t *v)
+{
+    sw_ftarget_t t = {(sw_bank_t *)v->bank, v->page_ctl, v->page_tog};
+    for (int enc = 0; enc < 16; enc++) {
+        ring_clear(enc);
+        int f = v->name_field >= 0 ? (enc < SW_NAME_LEN ? v->name_field : -1) : sw_field_at(v->page, enc);
+        if (f < 0)
+            continue;
+        int bright = f == v->last_field && v->name_field < 0;
+        int pos, hi;
+        if (v->name_field >= 0 || !sw_field_pos(&t, f, &pos, &hi)) {
+            ring_full(enc, sw_field_is_name(f) ? name_rgb : field_rgb, 1, 6);
+            continue;
+        }
+        int n = hi > 0 ? (pos * (ARC_LEDS - 1) + hi / 2) / hi : 0;
+        for (int i = 0; i < n; i++)
+            ring_set(enc, i, field_rgb, 1, bright ? 3 : 6);
+        ring_set(enc, n, field_rgb, bright ? 2 : 1, 1);
+    }
+}
+
 void ui_leds(const sw_view_t *v)
 {
-    if (v->shift) {
+    if (v->page) {
+        ring_page(v);
+    } else if (v->shift) {
         for (int s = 0; s < SW_SLOTS; s++)
             ring_slot(v, s);
         ring_bank(v);
@@ -292,6 +322,13 @@ void ui_leds(const sw_view_t *v)
         const uint16_t *targets = sw_targets(v->e);
         for (int enc = 0; enc < SW_ENCODERS; enc++)
             ring_play(v, enc, targets);
+    }
+    if (!v->page && v->hold_enc >= 0) {
+        /* a push held toward a page: the ring fills over the second */
+        int n = v->hold_progress >= 1000 ? 16 : v->hold_progress * 16 / 1000;
+        ring_clear(v->hold_enc);
+        for (int i = 0; i < n; i++)
+            ring_set(v->hold_enc, i, hold_rgb, 1, 1);
     }
     for (int r = 0; r < 16; r++)
         for (int i = 0; i < 16; i++)
@@ -561,10 +598,116 @@ static void draw_bottom(const sw_view_t *v)
     }
 }
 
+/* ---- the settings pages ---- */
+
+static char *put_ctl_title(char *p, const sw_view_t *v)
+{
+    int c = v->page_ctl;
+    *p++ = c < SW_ENCODERS ? 'A' : 'B';
+    p = ui_put_u(p, (uint32_t)(c % SW_ENCODERS) + 1);
+    *p++ = ' ';
+    return put_name(p, v->bank->ctl[c].name);
+}
+
+static void page_header(const sw_view_t *v, const sw_ftarget_t *t)
+{
+    char s[48], *p = s;
+    *p = 0;
+    if (v->last_field >= 0) {
+        /* the field last turned, in full */
+        char val[24];
+        sw_field_text(t, v->last_field, 1, val);
+        p = ui_put_s(p, sw_field_long(v->last_field));
+        p = ui_put_s(p, " ");
+        ui_put_s(p, val);
+        if (text_w(s, 1) > W - 4) { /* too wide: the short label */
+            p = ui_put_s(s, sw_field_label(v->last_field));
+            p = ui_put_s(p, " ");
+            ui_put_s(p, val);
+        }
+    } else if (v->page == SW_PAGE_KNOB) {
+        p = put_ctl_title(p, v);
+        p = ui_put_s(p, "  T");
+        ui_put_u(p, (uint32_t)v->page_tog + 1);
+    } else {
+        p = ui_put_s(p, "BANK ");
+        p = ui_put_u2(p, (uint32_t)v->bank_index + 1);
+        *p++ = ' ';
+        put_name(p, v->bank->name);
+    }
+    fill(0, 0, W, 8, 1);
+    text(2, 0, s, 1, 0);
+}
+
+static void draw_page(const sw_view_t *v)
+{
+    sw_ftarget_t t = {(sw_bank_t *)v->bank, v->page_ctl, v->page_tog};
+    page_header(v, &t);
+    for (int enc = 0; enc < 16; enc++) {
+        int f = sw_field_at(v->page, enc);
+        if (f < 0)
+            continue;
+        /* 14-pixel rows: the label, the value under it */
+        int x = (enc % 4) * 32 + 1, y = 9 + (enc / 4) * 14;
+        char val[24];
+        sw_field_text(&t, f, 0, val);
+        /* the label dark on a lit bar, the cell's width, so it stands
+         * apart from the values above and below with no room for a gap;
+         * the field last turned has its value lit too */
+        fill(x - 1, y, 31, 7, 1);
+        text(x, y, sw_field_label(f), 1, 0);
+        if (f == v->last_field) {
+            fill(x - 1, y + 7, 31, 7, 1);
+            text(x, y + 7, val, 1, 0);
+        } else {
+            text(x, y + 7, val, 1, 1);
+        }
+    }
+}
+
+static void draw_name_editor(const sw_view_t *v)
+{
+    sw_ftarget_t t = {(sw_bank_t *)v->bank, v->page_ctl, v->page_tog};
+    char s[40], *p;
+    p = ui_put_s(s, sw_field_long(v->name_field));
+    if (v->name_field != SW_F_BNAME) {
+        p = ui_put_s(p, v->name_field == SW_F_NAME ? " " : " T");
+        if (v->name_field == SW_F_NAME) {
+            *p++ = v->page_ctl < SW_ENCODERS ? 'A' : 'B';
+            ui_put_u(p, (uint32_t)(v->page_ctl % SW_ENCODERS) + 1);
+        } else {
+            ui_put_u(p, (uint32_t)v->page_tog + 1);
+        }
+    }
+    fill(0, 0, W, 8, 1);
+    text(2, 0, s, 1, 0);
+    /* the 8 characters, one per encoder 1-8, in a row of 16-pixel cells */
+    const char *name = sw_field_name(&t, v->name_field);
+    for (int i = 0; i < SW_NAME_LEN; i++) {
+        char c[2] = {name[i] && name[i] >= 32 && name[i] < 127 ? name[i] : ' ', 0};
+        int x = i * 16;
+        int w = text_w(c, 2);
+        text(x + (16 - w) / 2, 18, c, 2, 1);
+        fill(x + 3, 36, 10, 1, 1); /* a line under each cell */
+        char n[3];
+        ui_put_u(n, (uint32_t)i + 1);
+        text(x + (16 - text_w(n, 1)) / 2, 39, n, 1, 1);
+    }
+    text(0, 55, "enc 1-8: letters  push: done", 1, 1);
+}
+
 void ui_oled(const sw_view_t *v)
 {
     const sw_status_t *st = sw_status(v->e);
     clear();
+    if (v->page) {
+        if (v->name_field >= 0)
+            draw_name_editor(v);
+        else
+            draw_page(v);
+        api->display_present();
+        return;
+    }
     draw_header(v, st);
     draw_cycle(st);
     draw_slot_line(v, st);

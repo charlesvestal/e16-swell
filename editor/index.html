@@ -1014,6 +1014,8 @@ table.grid tr.sep td { border-top: 1px solid var(--edge2); }
     const d = X.decodeBank(blob);
     if (!d.ok) { log(`bank ${b + 1}: the E16 sent a bad blob (${d.err})`, true); return; }
     const keep = !replace && edited(b);
+    if (keep && S.dev[b] && !sameBytes(blob, S.dev[b]))
+      log(`bank ${b + 1} changed on the E16; keeping your unsent edits here (Send puts them on the E16)`, true);
     S.dev[b] = blob;
     if (!keep) { S.banks[b] = d.bank; S.full[b] = false; S.touched[b] = false; }
     if (b === S.sel && !keep) renderSetup(); else renderBanks();
@@ -1036,7 +1038,9 @@ table.grid tr.sep td { border-top: 1px solid var(--edge2); }
     S.lastEvAt = performance.now();
     /* the E16 stored a slot: re-read that bank (only if not edited here) */
     if (prev && prev.bank === ev.bank && prev.stored_mask !== ev.stored_mask) scheduleRefresh(ev.bank);
-    else if (prev && prev.bank === ev.bank && ev.dirty && !prev.dirty) scheduleRefresh(ev.bank);
+    /* ... or changed it: dirty is an edit count (0 = saved), so every
+       change on the E16 (its settings pages, a fade) moves it on */
+    else if (prev && prev.bank === ev.bank && ev.dirty && ev.dirty !== prev.dirty) scheduleRefresh(ev.bank);
     if (!prev || prev.bank !== ev.bank) renderBanks();
     dirtyLive = true;
   }

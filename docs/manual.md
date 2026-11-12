@@ -103,6 +103,56 @@ The rings in Shift mode show each slot's state:
 Ring 16 shows the layer and the bank: a dim ring in the layer's colour,
 with one bright LED at the bank's position (bank 1 at 7 o'clock).
 
+### Setting up on the E16
+
+Everything the editor sets, you can also set on the E16, on two
+settings pages. Each is a 4×4 grid laid out like the encoders: a label
+on a lit bar, with the value under it.
+
+**Hold a push for 1 s without turning:**
+
+| Hold | Opens |
+|---|---|
+| Encoder *n*, in play mode | the **knob page** for control *n* on the current layer, and toggle *n* |
+| Encoder 16, in Shift mode | the **bank page** |
+
+The ring fills white while you hold. Turning during the hold cancels it,
+and a short push still flips the toggle.
+
+**The knob page:**
+
+| | | | |
+|---|---|---|---|
+| **TYPE** off, CC7, CC14, NRPN7 (`NRP7`), NRPN14 (`NR14`) | **CH** channel | **NUM** CC or NRPN number | **PORT** where it goes: `1` TRS 1, `2` TRS 2, `U` USB |
+| **MIN** | **MAX** (below MIN inverts it) | **NAME** push to edit | |
+| **TCC** the toggle's CC | **TCH** its channel | **TPRT** its ports (`off`: it sends nothing) | |
+| **TOFF** the value sent for off | **TON** for on | **TNAM** push to edit | |
+
+**The bank page:**
+
+| | | | |
+|---|---|---|---|
+| **CYCL** cycle length, 1–16 bars | **JMPQ** when a jump lands: now, next beat, next bar | **BPM** the internal tempo | **CLK** where the clock goes out |
+| **ALCH** the channel of every control and toggle | **ALPT** the ports of everything that sends | **NAME** push to edit | |
+
+ALCH and ALPT show `mix` when the bank differs; the first turn makes
+them all the same.
+
+- **Turn** an encoder to change its field. **Push and turn** for big
+  steps (128 on a 14-bit range, 10 on a 0–127 one); on BPM, push and
+  turn goes in 0.1 instead of whole BPM.
+- The **header** shows the page (`A3 CUTOFF  T3`), or the field you just
+  turned in full (`channel 2`), and that cell lights up.
+- The **rings** show where each field sits in its range.
+- **Names:** push a NAME cell. Encoders 1–8 are then the 8 characters,
+  each turning through space, A–Z, 0–9, a few signs and a–z.
+- **Back:** push any other encoder, or tap Shift: from the name editor
+  to the page, from the page to playing.
+
+The music keeps going while you're on a page: the clock, drops and
+fades carry on. Changes save like any other (the dot in the header),
+and the editor picks them up on its own.
+
 ### The OLED
 
 <p align="center"><img src="images/armed.png" width="300" alt="Slot 5 armed: ARM S05, 1 bar linear; white target dots on the rings"></p>
@@ -187,12 +237,12 @@ that's logged.
 - A save to the flash holds everything up for about 20 ms, so one
   clock-out pulse comes that much late.
 - **Memory:** all 16 banks stay in RAM (about 29 KB). The app has about
-  17 KB of code and 40 KB of data, well inside the app limits.
+  22 KB of code and 40 KB of data, well inside the app limits.
 
 ## Tests
 
 `make test` runs the host tests in `test/`: the engine (clock following,
-drops, jumps, every fade curve, override), the bank file format, the
+drops, jumps, every fade curve, override), the settings pages' fields, the bank file format, the
 MIDI output (exact CC14/NRPN bytes, the rate limit), the editor protocol,
 and the editor's JavaScript codec against the C one. The front end
 (`src/app.c`, `src/ui.c`) is checked on the device.

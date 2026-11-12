@@ -60,7 +60,9 @@
  *                       clock_source u8, running u8, bpm_x10 u16,
  *                       cycle_clocks u32, cycle_pos u32,
  *                       stored_mask u16 (bit s = slot s stored),
- *                       dirty u8 (the bank has unsaved changes),
+ *                       dirty u8 (0: saved; 1-255: unsaved, a count
+ *                         that changes with every change to the bank,
+ *                         on the E16 or from here),
  *                       toggles u16, live[32] u16,
  *                       has_targets u8, targets[32] u16 (zeros if none)
  *                     = 156 raw bytes (179 packed, 186 on the wire)
@@ -102,7 +104,8 @@ typedef struct {
     /* bank b's contents changed (commit or store): the app marks it
      * dirty and saves it later. */
     void (*bank_dirty)(void *user, int bank);
-    /* 1 if bank b has unsaved changes (for EVENT's dirty). */
+    /* 0 if bank b is saved, else 1-255, changing with every change (for
+     * EVENT's dirty). */
     int (*is_dirty)(void *user, int bank);
     /* switch the current bank (the app does sw_set_bank, the OLED etc.) */
     void (*select_bank)(void *user, int bank, uint32_t now);

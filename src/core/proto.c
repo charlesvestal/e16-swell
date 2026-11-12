@@ -166,7 +166,10 @@ static int event_payload(sw_proto_t *p, uint8_t *r)
             mask |= 1u << s;
     put16(r + o, mask);
     o += 2;
-    r[o++] = (uint8_t)(h->is_dirty ? (h->is_dirty(h->user, bank) != 0) : 0);
+    {   /* 0 saved, else a count the host moves on with every change */
+        int d = h->is_dirty ? h->is_dirty(h->user, bank) : 0;
+        r[o++] = (uint8_t)(d < 0 ? 1 : d > 255 ? 255 : d);
+    }
     put16(r + o, h->engine->toggles);
     o += 2;
     for (int c = 0; c < SW_CONTROLS; c++, o += 2)

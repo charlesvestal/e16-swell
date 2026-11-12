@@ -15,6 +15,7 @@ test:
 	cmake -S test -B build-host >/dev/null
 	cmake --build build-host
 	build-host/swell_core_test | tail -1
+	build-host/swell_fields_test | tail -1
 	build-host/swell_proto_test | tail -1
 	node test/editor_codec_test.mjs build-host/swell_blobdump | tail -1
 
