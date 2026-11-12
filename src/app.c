@@ -609,6 +609,10 @@ static void surface(uint32_t now)
 
         if (d && settle && e < 15)
             d = 0;
+        /* Shift + push 16 is the layer: a click of turn that comes with
+         * the push mustn't change the bank (or cancel the push) */
+        if (d && e == 15 && down[e] && press_shift[e])
+            d = 0;
         if (d) {
             if (shift_raw)
                 shift_used = 1;

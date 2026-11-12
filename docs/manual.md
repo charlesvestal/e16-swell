@@ -86,7 +86,7 @@ when you want both hands free for the slots.
 | Hold encoder 1-15 for 0.6 s, then release | **Stores** the live values and toggles into that slot. The ring and the OLED fill up while you hold; once full, the OLED says `RELEASE: STORE`, and the store happens when you let go. Turning the encoder before you let go cancels the store (it's a curve edit instead). |
 | Turn encoder 1-15 | Changes that slot's fade length: cut, 1 beat, 2 beats, 1 bar, 2 bars, 4 bars or 8 bars. |
 | Push and turn encoder 1-15 | Changes that slot's curve: linear, ease, S-curve or hold. With hold, the values stay put until the end of the fade and then cut. |
-| Push and release encoder 16 | Switches between layers A and B. |
+| Push and release encoder 16 | Switches between layers A and B. A turn while it's pushed is ignored, so a click that comes with the push can't change the bank. |
 | Turn encoder 16 | Changes the bank. The new bank jumps to its slot 1 if that slot is stored. |
 | Hold Shift on its own for 5 s | The launcher's leave prompt: push encoder 1 to leave (Swell saves first), or let go of Shift to stay. |
 

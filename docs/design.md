@@ -65,7 +65,7 @@ Shift held:
 - Push and release in under 600 ms calls `sw_slot_press`, which arms the slot, or jumps to it if it's already armed.
 - Holding for 600 ms or more, then releasing, calls `sw_store`; a turn before the release makes it a curve edit instead. The OLED shows the store filling up while you hold.
 - Turning a slot changes its fade length. Shift + push + turn changes its curve.
-- Encoder 16: Shift + push flips the layer, and Shift + turn changes the bank, which loads it and jumps to its slot 1.
+- Encoder 16: Shift + push flips the layer, and Shift + turn changes the bank, which loads it and jumps to its slot 1. Turns while 16 is pushed are ignored: a push often comes with a click of turn, which changed the bank instead of the layer (2026-11-12).
 - Exit: the launcher's leave prompt, Shift held on its own for 5 s, then encoder 1 (it replaced the launcher's Shift-held-1-s exit on 2026-11-04); Swell saves, then exits, when `api->exit_pending()` says so.
 
 Settings pages (added 2026-11-12, so that everything the editor sets can be set on the E16 too):
