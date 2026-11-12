@@ -477,6 +477,7 @@ static void slot_edit(int s, int d, int curve)
 
 static int page = SW_PAGE_NONE, page_ctl, page_tog;
 static int name_field = -1;            /* the name editor's field, or -1 */
+static int page_half;                  /* the half of the grid on the OLED */
 static int last_field = -1;
 static uint32_t last_field_ms;
 
@@ -493,6 +494,7 @@ static void page_open(int pg, int enc)
     page_tog = pg == SW_PAGE_KNOB ? enc : 0;
     name_field = -1;
     last_field = -1;
+    page_half = 0;
     api->log(pg == SW_PAGE_KNOB ? "swell: knob page" : "swell: bank page");
 }
 
@@ -518,6 +520,7 @@ static void page_turn(int e, int d, int alt)
         f = sw_field_at(page, e);
         if (f < 0)
             return;
+        page_half = e / 8; /* the OLED shows the half being turned */
         changed = sw_field_turn(&t, f, d, alt);
     }
     last_field = f;
@@ -692,6 +695,7 @@ static void draw(void)
     v.page_ctl = page_ctl;
     v.page_tog = page_tog;
     v.name_field = name_field;
+    v.page_half = page_half;
     v.last_field = last_field >= 0 && last_ms - last_field_ms < FIELD_SHOW_MS ? last_field : -1;
     v.hold_enc = -1;
     v.hold_progress = 0;

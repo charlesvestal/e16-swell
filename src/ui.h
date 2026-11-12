@@ -33,6 +33,7 @@ typedef struct {
     int page;               /* SW_PAGE_* (fields.h): a settings page is up */
     int page_ctl, page_tog; /* the knob page's control and toggle */
     int name_field;         /* the name editor's field, or -1 */
+    int page_half;          /* the half shown: 0 encoders 1-8, 1 encoders 9-16 */
     int last_field;         /* the field turned in the last 2 s, or -1 */
     int hold_enc;           /* a push being held toward a page: -1 = none */
     uint16_t hold_progress; /* 0..1000 of the 1 s hold */

@@ -625,43 +625,50 @@ static void page_header(const sw_view_t *v, const sw_ftarget_t *t)
             p = ui_put_s(p, " ");
             ui_put_s(p, val);
         }
+    } else if (v->page == SW_PAGE_KNOB && v->page_half) {
+        p = ui_put_s(p, "TOGGLE ");
+        p = ui_put_u(p, (uint32_t)v->page_tog + 1);
+        *p++ = ' ';
+        put_name(p, v->bank->tog[v->page_tog].name);
     } else if (v->page == SW_PAGE_KNOB) {
-        p = put_ctl_title(p, v);
-        p = ui_put_s(p, "  T");
-        ui_put_u(p, (uint32_t)v->page_tog + 1);
+        put_ctl_title(p, v);
     } else {
         p = ui_put_s(p, "BANK ");
         p = ui_put_u2(p, (uint32_t)v->bank_index + 1);
         *p++ = ' ';
         put_name(p, v->bank->name);
     }
-    fill(0, 0, W, 8, 1);
-    text(2, 0, s, 1, 0);
+    fill(0, 0, W, 10, 1);
+    text(2, 1, s, 1, 0);
 }
 
+/* Half the grid at a time (encoders 1-8 or 9-16), so the lines have room:
+ * two rows of four cells, a label over its value. */
 static void draw_page(const sw_view_t *v)
 {
     sw_ftarget_t t = {(sw_bank_t *)v->bank, v->page_ctl, v->page_tog};
     page_header(v, &t);
-    for (int enc = 0; enc < 16; enc++) {
+    int half = v->page == SW_PAGE_KNOB ? v->page_half : 0;
+    for (int k = 0; k < 8; k++) {
+        int enc = half * 8 + k;
         int f = sw_field_at(v->page, enc);
         if (f < 0)
             continue;
-        /* 14-pixel rows: the label, the value under it */
-        int x = (enc % 4) * 32 + 1, y = 9 + (enc / 4) * 14;
+        int x = (k % 4) * 32 + 2, y = 14 + (k / 4) * 25;
         char val[24];
         sw_field_text(&t, f, 0, val);
-        /* the label dark on a lit bar, the cell's width, so it stands
-         * apart from the values above and below with no room for a gap;
-         * the field last turned has its value lit too */
-        fill(x - 1, y, 31, 7, 1);
-        text(x, y, sw_field_label(f), 1, 0);
+        text(x, y, sw_field_label(f), 1, 1);
+        fill(x, y + 9, 26, 1, 1); /* a rule between the label and the value */
         if (f == v->last_field) {
-            fill(x - 1, y + 7, 31, 7, 1);
-            text(x, y + 7, val, 1, 0);
+            fill(x - 2, y + 11, 31, 10, 1);
+            text(x, y + 12, val, 1, 0);
         } else {
-            text(x, y + 7, val, 1, 1);
+            text(x, y + 12, val, 1, 1);
         }
+    }
+    if (v->page == SW_PAGE_KNOB) {
+        /* which half: a marker at the right edge, top or bottom */
+        fill(W - 2, half ? 37 : 14, 2, 23, 1);
     }
 }
 
@@ -679,8 +686,8 @@ static void draw_name_editor(const sw_view_t *v)
             ui_put_u(p, (uint32_t)v->page_tog + 1);
         }
     }
-    fill(0, 0, W, 8, 1);
-    text(2, 0, s, 1, 0);
+    fill(0, 0, W, 10, 1);
+    text(2, 1, s, 1, 0);
     /* the 8 characters, one per encoder 1-8, in a row of 16-pixel cells */
     const char *name = sw_field_name(&t, v->name_field);
     for (int i = 0; i < SW_NAME_LEN; i++) {

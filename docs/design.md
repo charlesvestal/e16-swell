@@ -70,7 +70,7 @@ Shift held:
 
 Settings pages (added 2026-11-12, so that everything the editor sets can be set on the E16 too):
 - **Getting in:** hold a push for 1 s without turning. In play mode that opens the **knob page** for that encoder (control `layer*16+i` and toggle *i*); Shift + encoder 16 opens the **bank page**. The ring fills white while you hold, and a turn during the hold cancels it (it's fine steps then). A shorter push still toggles. The launcher's own Shift + hold-16 bootloader gesture only runs in its menu, not in apps (`app_mode.c` only watches for the leave prompt), so the two don't meet. There's no other shortcut: the cycle length, say, is on the bank page only.
-- **Layout:** a 4×4 grid, one field per encoder, matching the encoders. Each cell is a 4-letter label (dark on a lit bar) over the value.
+- **Layout:** a 4×4 grid, one field per encoder, matching the encoders. The OLED shows half of it at a time, encoders 1–8 or 9–16 (whichever half was turned last; a bar at the right edge says which), as two rows of four cells: a 4-letter label, a rule, the value. All 16 cells at once were too cramped to read.
   - Knob page: `TYPE CH NUM PORT` / `MIN MAX NAME ·` / `TCC TCH TPRT ·` / `TOFF TON TNAM ·` (the top half the control, the bottom half the toggle).
   - Bank page: `CYCL JMPQ BPM CLK` / `ALCH ALPT NAME ·`, the rest empty.
 - **Turning** a field changes it. With the push held it's coarse (×128 on a 14-bit range, ×10 on a 0–127 one), except the tempo, which turns in whole BPM and pushed in 0.1.

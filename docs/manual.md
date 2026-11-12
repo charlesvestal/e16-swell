@@ -106,8 +106,10 @@ with one bright LED at the bank's position (bank 1 at 7 o'clock).
 ### Setting up on the E16
 
 Everything the editor sets, you can also set on the E16, on two
-settings pages. Each is a 4×4 grid laid out like the encoders: a label
-on a lit bar, with the value under it.
+settings pages. Each is a 4×4 grid laid out like the encoders, one
+setting per encoder. The OLED shows half of it at a time: encoders 1–8
+(the control), or 9–16 (its toggle) once you turn one of those. A bar
+at the right edge shows which half you're looking at.
 
 **Hold a push for 1 s without turning:**
 
