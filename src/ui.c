@@ -652,9 +652,18 @@ static void draw_page(const sw_view_t *v)
     for (int k = 0; k < 8; k++) {
         int enc = half * 8 + k;
         int f = sw_field_at(v->page, enc);
-        if (f < 0)
-            continue;
         int x = (k % 4) * 32 + 2, y = 14 + (k / 4) * 25;
+        if (f < 0) {
+            if (v->page == SW_PAGE_KNOB) {
+                /* a blank cell: pushing it shows the other half */
+                char a[8] = {(char)(half ? 130 : 131), ' ', 0};
+                ui_put_s(a + 2, half ? "1-8" : "9-16");
+                text(x, y, "PUSH", 1, 1);
+                fill(x, y + 9, 26, 1, 1);
+                text(x, y + 12, a, 1, 1);
+            }
+            continue;
+        }
         char val[24];
         sw_field_text(&t, f, 0, val);
         text(x, y, sw_field_label(f), 1, 1);

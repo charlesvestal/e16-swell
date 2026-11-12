@@ -17,8 +17,9 @@
  * play mode, the knob page (that control and toggle), in Shift mode on
  * encoder 16, the bank page. A turn changes the field under it (pushed:
  * coarse, or fine for the tempo); a push on a name field opens the name
- * editor (encoders 1-8 the characters), any other push or a Shift tap
- * goes back. The engine runs on meanwhile.
+ * editor (encoders 1-8 the characters), on a blank cell of the knob page
+ * shows the other half of it, and any other push or a Shift tap goes
+ * back. The engine runs on meanwhile.
  * Leaving is the launcher's: hold Shift on its own for 5 s, then push
  * encoder 1 at its prompt; Swell saves what's unsaved, then exits. A
  * Shift tap latches the Shift surface, for hands-free slot work.
@@ -536,6 +537,10 @@ static void page_push(int e)
         name_field = f;
         last_field = f;
         last_field_ms = last_ms;
+    } else if (name_field < 0 && f < 0 && page == SW_PAGE_KNOB) {
+        /* a blank cell: the other half of the grid on the OLED */
+        page_half = !page_half;
+        last_field = -1;
     } else {
         page_close();
     }

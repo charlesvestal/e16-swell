@@ -108,8 +108,11 @@ with one bright LED at the bank's position (bank 1 at 7 o'clock).
 Everything the editor sets, you can also set on the E16, on two
 settings pages. Each is a 4×4 grid laid out like the encoders, one
 setting per encoder. The OLED shows half of it at a time: encoders 1–8
-(the control), or 9–16 (its toggle) once you turn one of those. A bar
-at the right edge shows which half you're looking at.
+(the control), or 9–16 (its toggle). On the knob page, push one of the
+blank knobs (8, 12 or 16, marked `PUSH ↓ 9-16` or `PUSH ↑ 1-8`) to see
+the other half without changing anything; turning a knob in the other
+half switches too. A bar at the right edge shows which half you're
+looking at.
 
 **Hold a push for 1 s without turning:**
 
@@ -148,8 +151,9 @@ them all the same.
 - The **rings** show where each field sits in its range.
 - **Names:** push a NAME cell. Encoders 1–8 are then the 8 characters,
   each turning through space, A–Z, 0–9, a few signs and a–z.
-- **Back:** push any other encoder, or tap Shift: from the name editor
-  to the page, from the page to playing.
+- **Back:** push any other encoder (not a blank one on the knob page),
+  or tap Shift: from the name editor to the page, from the page to
+  playing.
 
 The music keeps going while you're on a page: the clock, drops and
 fades carry on. Changes save like any other (the dot in the header),

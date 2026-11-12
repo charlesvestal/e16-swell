@@ -78,6 +78,7 @@ Settings pages (added 2026-11-12, so that everything the editor sets can be set 
   - Ports step through the 8 masks, shown `1-U` (TRS 1, TRS 2, USB).
   - **ALCH** sets the channel of all 32 controls and 16 toggles; **ALPT** the ports of every control and toggle that sends (type not OFF, ports not none), never to none. Both show `mix` when the bank differs, and the first turn from `mix` makes them all the first one's.
 - **Names:** pushing a NAME cell opens the name editor: encoders 1–8 are the 8 characters, each turning through space, A–Z, 0–9, `-+./:#*!?` and a–z (wrapping). Spaces at the end become the NUL padding.
+- **The other half:** on the knob page a push on a blank cell (encoders 8, 12, 16, drawn `PUSH ↓ 9-16` / `PUSH ↑ 1-8`) shows the other half of the grid, so you can look without turning anything.
 - **Getting out:** any other push, or a Shift tap, goes back (from the name editor to the page, from the page to play).
 - **Meanwhile:** the engine runs on: clock, drops and fades. A changed mapping takes effect with the next value sent; nothing is resent on its own.
 - **The rings:** each field's ring is an arc to its value, a name field a dim full ring, and the field last turned brighter.
