@@ -184,6 +184,8 @@ that's logged.
   you touch something, so an empty bank never zeroes your rig.
 - There's no chaining of snapshots and no MIDI merge (input isn't
   passed through). Chaining is planned for v1.1.
+- A save to the flash holds everything up for about 20 ms, so one
+  clock-out pulse comes that much late.
 - **Memory:** all 16 banks stay in RAM (about 29 KB). The app has about
   17 KB of code and 40 KB of data, well inside the app limits.
 

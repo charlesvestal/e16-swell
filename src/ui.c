@@ -2,9 +2,7 @@
  * Swell: the rings and the OLED (see ui.h).
  *
  * Rings. LED 0 sits at about 7 o'clock and the LEDs run clockwise to
- * LED 15 at about 5 o'clock, the gap at 6 o'clock (the launcher's own
- * value arcs fill from LED 0 clockwise; docs/hw-acceptance.md, "LED
- * order" -- OXI hasn't confirmed the physical order). A value arc uses
+ * LED 15 at the bottom, by the gap (checked on the device). A value arc uses
  * LEDs 0..14 like a knob from 7 to about 4 o'clock; LED 15, the one
  * next to the bottom gap, is the toggle.
  *
