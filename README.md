@@ -2,10 +2,7 @@
 
 **A snapshot-morphing performance controller for the OXI E16.**
 
-Store the state of every knob in a snapshot. Then move to another one, either
-now (a *jump*) or right on the next cycle boundary (a *drop*), with a fade
-whose length and curve you choose. Grab a knob mid-fade and it's yours: that
-control leaves the fade and the rest carry on.
+Store the state of every knob in a snapshot. Trigger another scene, on the next bar / cycle boundary, with a configurable fade length and curve.
 
 Swell is a native app for the [E16 Launcher](https://github.com/charlesvestal/e16-sdk-examples)
 firmware. A web editor sets up the mapping and shows everything live.
