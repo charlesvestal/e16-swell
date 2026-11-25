@@ -44,20 +44,47 @@ firmware. A web editor sets up the mapping and shows everything live.
 
 ## Get it running
 
-You need an E16 running the E16 Launcher at
+Swell runs on the E16 Launcher firmware at
 [`71f2c88`](https://github.com/charlesvestal/e16-sdk-examples/commit/71f2c88) or later, which has the leave prompt.
+There are no prebuilt downloads yet, so you build both the launcher and Swell yourself.
+It works the same way on Windows, macOS and Linux.
 
-1. **Build** (needs `arm-none-eabi-gcc`, CMake and Python 3):
+1. **Install the tools:**
+   - [Git](https://git-scm.com/downloads)
+   - [CMake](https://cmake.org/download/)
+   - [Ninja](https://github.com/ninja-build/ninja/releases)
+   - [Python 3](https://www.python.org/downloads/) (on Windows, tick *Add Python to PATH* in the installer)
+   - the [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads), the `arm-none-eabi` version for your computer (on Windows, let the installer add it to PATH)
+
+   Then install the MIDI library the uploader uses: `pip install python-rtmidi`.
+
+2. **Build:** in a terminal (Command Prompt or PowerShell on Windows), run:
 
    ```sh
    git clone --recursive https://github.com/charlesvestal/e16-swell.git
    cd e16-swell
-   make              # build/swell.e16app
+   cmake -S . -B build -G Ninja
+   cmake --build build                  # build/swell.e16app
+
+   cd external/e16-sdk-examples
+   cmake -S . -B build -G Ninja -DE16_DEV_CONSOLE=OFF
+   cmake --build build                  # build/launcher.bin
    ```
 
-2. **Install:** on the E16, pick *Disk mode* from the launcher menu, copy
-   `build/swell.e16app` to `/apps/` on the drive that appears, and eject.
-3. **Play:** start **swell** from the menu.
+   On macOS and Linux, `make` in `e16-swell` does the first build too.
+
+3. **Put the launcher on the E16** (once): with the E16 off, hold encoders 15
+   and 16 and press Shift to turn it on. It shows up as "E16 FW Update".
+   Then, still in `external/e16-sdk-examples`, run:
+
+   ```sh
+   python external/E16-SDK/tools/e16_upload.py upload build/launcher.bin
+   ```
+
+   (On macOS and Linux it's `python3`.)
+4. **Install Swell:** on the E16, pick *Disk mode* from the launcher menu, copy
+   `build/swell.e16app` (in `e16-swell`) to `/apps/` on the drive that appears, and eject.
+5. **Play:** start **swell** from the menu.
 
 Out of the box every bank sends CC 20–35 (layer A) and CC 40–55 (layer B) on
 channel 1 to TRS 1 and USB, and the toggles send CC 80–95. Open

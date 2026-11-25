@@ -25,7 +25,8 @@ a fade of your choice. It runs as a native app on the
 
 You need the E16 Launcher at
 [`71f2c88`](https://github.com/charlesvestal/e16-sdk-examples/commit/71f2c88)
-or later on the E16 (see its README for flashing). Then:
+or later on the E16. The [README](../README.md#get-it-running) walks
+through building and flashing both, Windows included. Then:
 
 ```sh
 git clone --recursive https://github.com/charlesvestal/e16-swell.git
